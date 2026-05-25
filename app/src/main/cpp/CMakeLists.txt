@@ -1,15 +1,13 @@
 cmake_minimum_required(VERSION 3.22.1)
-
 project("bb-renderer")
 
-# ネイティブライブラリの作成
+# CMakeが実行される場所を起点とした明示的なソースパス指定
 add_library(
     native-lib
     SHARED
-    native-lib.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/native-lib.cpp
 )
 
-# ログ出力用のライブラリをリンク
 find_library(log-lib log)
 
 target_link_libraries(
