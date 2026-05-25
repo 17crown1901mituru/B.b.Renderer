@@ -25,20 +25,16 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.2'
-
+      # 1. ここでgradlewに権限を付与（重要）
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # 2. ビルド実行
       - name: Build debug APK
         run: |
-          # 1. ビルドキャッシュを強制削除して前回の失敗の影響を排除
+          # クリーンビルドの実行
           ./gradlew clean
-          # 2. ネイティブライブラリのビルドを含めて実行
-          # --stacktrace で詳細エラーを出力し、もし失敗した場所を特定できるようにする
+          # ネイティブビルドを含めて実行
           ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload APK
