@@ -1,6 +1,0 @@
-      - name: Build debug APK
-        run: |
-          chmod +x gradlew
-          # カレントディレクトリを確認しつつビルドを実行
-          ls -R app/src/main/cpp/  # これでファイルが本当に存在するか確認
-          ./gradlew clean :app:assembleDebug --stacktrace
