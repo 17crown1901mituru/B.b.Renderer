@@ -24,7 +24,15 @@ class GlobalAppSettings(context: Context) {
         const val DEFAULT_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/124.0.0.0 Mobile Safari/537.36 B.b.Renderer/1.0"
+
+        // DuckDuckGoのHTML版(サーバーレンダリング、JS不要)。このエンジンはJS実行環境が
+        // フルブラウザ相当ではないため、検索結果自体が重いJSに依存しないものを既定にする。
+        const val DEFAULT_SEARCH_TEMPLATE = "https://html.duckduckgo.com/html/?q=%s"
     }
+
+    var searchEngineUrlTemplate: String
+        get() = prefs.getString("search_engine_url_template", DEFAULT_SEARCH_TEMPLATE) ?: DEFAULT_SEARCH_TEMPLATE
+        set(value) = prefs.edit().putString("search_engine_url_template", value).apply()
 
     var userAgent: String
         get() = prefs.getString(KEY_USER_AGENT, DEFAULT_USER_AGENT) ?: DEFAULT_USER_AGENT

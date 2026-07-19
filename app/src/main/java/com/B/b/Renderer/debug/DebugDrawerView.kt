@@ -38,8 +38,21 @@ class DebugDrawerView(
     private val globalSettings: GlobalAppSettings? = null,
     private val currentDomainProvider: (() -> String)? = null,
     private val onGlobalSettingsChanged: (() -> Unit)? = null,
+    private val onNavigateRequested: ((String) -> Unit)? = null,
+    private val currentUrlProvider: (() -> String)? = null,
     val tabBarView: TabBarView? = null,
 ) : LinearLayout(context) {
+
+    private val addressBarInput = android.widget.EditText(context).apply {
+        hint = "URLまたは検索語句"
+        setTextColor(Color.WHITE)
+        setHintTextColor(Color.GRAY)
+        textSize = 13f
+        isSingleLine = true
+        imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_GO
+        setBackgroundColor(Color.parseColor("#333333"))
+        setPadding(dp(10), dp(8), dp(10), dp(8))
+    }
 
     private val logText = TextView(context).apply {
         setTextColor(Color.parseColor("#00FF66"))
@@ -61,6 +74,7 @@ class DebugDrawerView(
         setBackgroundColor(Color.parseColor("#EE111111"))
         layoutParams = ViewGroup.LayoutParams(dp(320), ViewGroup.LayoutParams.MATCH_PARENT)
 
+        addView(buildAddressBar())
         tabBarView?.let {
             addView(buildTabsHeader())
             addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -190,6 +204,51 @@ class DebugDrawerView(
         }
     }
 
+    private fun buildAddressBar(): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(4))
+        }
+        row.addView(
+            addressBarInput,
+            LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        addressBarInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO) {
+                submitAddressBar()
+                true
+            } else {
+                false
+            }
+        }
+        row.addView(smallButton("移動") { submitAddressBar() })
+        // 現在のURLをアドレスバーに反映しておく(タブ切替時等はrefresh()から呼ばれる)
+        currentDomainProvider?.let { addressBarInput.hint = "URLまたは検索語句" }
+        return row
+    }
+
+    private fun submitAddressBar() {
+        val input = addressBarInput.text.toString().trim()
+        if (input.isBlank()) return
+        onNavigateRequested?.invoke(resolveAddressBarInput(input))
+    }
+
+    /**
+     * 入力がURLか検索語句かを簡易判定する。
+     *   - http(s)://で始まる → そのまま
+     *   - 空白を含まず、ドットを含む(example.com等) → https://を補ってURL扱い
+     *   - それ以外 → 検索エンジンのテンプレートに埋め込む
+     */
+    private fun resolveAddressBarInput(input: String): String {
+        if (input.startsWith("http://") || input.startsWith("https://")) return input
+        val looksLikeDomain = !input.contains(" ") && input.contains(".")
+        if (looksLikeDomain) return "https://$input"
+        val template = globalSettings?.searchEngineUrlTemplate ?: GlobalAppSettings.DEFAULT_SEARCH_TEMPLATE
+        val encoded = java.net.URLEncoder.encode(input, "UTF-8")
+        return template.replace("%s", encoded)
+    }
+
     private fun buildTabsHeader(): TextView =
         TextView(context).apply {
             text = "タブ"
@@ -230,18 +289,31 @@ class DebugDrawerView(
         logText.text = text.ifBlank { "(記録なし)" }
         refreshPermissions()
         tabBarView?.refresh()
+        if (!addressBarInput.isFocused) {
+            currentUrlProvider?.invoke()?.let { addressBarInput.setText(it) }
+        }
     }
 
     /** ドロワーが開いている間だけ1秒間隔で自動更新する */
     fun setAutoRefresh(enabled: Boolean) {
         autoRefresh = enabled
-        if (enabled) scheduleTick()
+        if (enabled) {
+            refresh() // 開いた瞬間は全体を最新化する
+            scheduleLogTick()
+        }
     }
 
-    private fun scheduleTick() {
+    /**
+     * ログ表示だけを1秒おきに更新する。タブバー・許可設定チェックボックスは
+     * ここでは触らない(以前はrefresh()を丸ごと1秒おきに呼んでいたため、
+     * ボタン/チェックボックスが毎秒作り直され、タップの瞬間に差し替わって
+     * 反応しなくなることがあった)。
+     */
+    private fun scheduleLogTick() {
         if (!autoRefresh) return
-        refresh()
-        refreshHandler.postDelayed({ scheduleTick() }, 1000)
+        val text = BehaviorAuditLog.dumpAsText()
+        logText.text = text.ifBlank { "(記録なし)" }
+        refreshHandler.postDelayed({ scheduleLogTick() }, 1000)
     }
 
     private fun dp(value: Int): Int =

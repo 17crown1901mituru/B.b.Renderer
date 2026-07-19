@@ -168,6 +168,8 @@ class EngineActivity : AppCompatActivity() {
                     capabilityBridge.releaseWakeLock()
                 }
             },
+            onNavigateRequested = { url -> CoroutineScope(Dispatchers.Main).launch { navigateForegroundTo(url) } },
+            currentUrlProvider = { currentPageUrl },
             tabBarView = tabBarView,
         )
         val drawerParams = DrawerLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT)
