@@ -15,19 +15,22 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.B.b.Renderer.permissions.GlobalAppSettings
 import com.B.b.Renderer.permissions.SitePermissions
+import com.B.b.Renderer.tabs.TabBarView
+import com.B.b.Renderer.tabs.TabManager
 
 /**
  * BehaviorAuditLogをその場で見るためのデバッグ用サイドパネル。
- * 加えて、ドメイン単位のブラウザ機能許可(Vibrate/WakeLock/OrientationLock)を
- * その場でON/OFFできる簡易設定もここに置く(専用の設定画面ができるまでの暫定)。
+ * 加えて、タブ一覧・ドメイン単位のブラウザ機能許可・アプリ全体設定もここに集約する
+ * (2026-07議論分: ブラウザとしての機能・設定はドロワー側に寄せて、ページ描画領域を
+ * 画面いっぱいに使えるようにする方針)。
  *
  * 画面上にEngineView(ページ描画)・ソフトウェアキーボード・デバッグ表示が
  * 同時に重なるとごちゃつくため、常時表示ではなくDrawerLayoutで画面端に
  * 隠しておき、必要な時だけ引き出す形にしている(EngineActivity側で
  * DrawerLayoutのendドロワーとして配置する想定)。
  *
- * ここはあくまで「見る・エクスポートする・許可を切り替える」ためのビューで、
- * ShortcutApiのような実行権限を持つAPIではない。
+ * ここはあくまで「見る・エクスポートする・許可を切り替える・タブを操作する」ための
+ * ビューで、ShortcutApiのような実行権限を持つAPIではない。
  */
 class DebugDrawerView(
     context: Context,
@@ -35,6 +38,7 @@ class DebugDrawerView(
     private val globalSettings: GlobalAppSettings? = null,
     private val currentDomainProvider: (() -> String)? = null,
     private val onGlobalSettingsChanged: (() -> Unit)? = null,
+    val tabBarView: TabBarView? = null,
 ) : LinearLayout(context) {
 
     private val logText = TextView(context).apply {
@@ -57,6 +61,10 @@ class DebugDrawerView(
         setBackgroundColor(Color.parseColor("#EE111111"))
         layoutParams = ViewGroup.LayoutParams(dp(320), ViewGroup.LayoutParams.MATCH_PARENT)
 
+        tabBarView?.let {
+            addView(buildTabsHeader())
+            addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
         addView(buildToolbar())
         addView(buildGlobalSettingsPanel())
         addView(buildPermissionsHeader())
@@ -182,6 +190,14 @@ class DebugDrawerView(
         }
     }
 
+    private fun buildTabsHeader(): TextView =
+        TextView(context).apply {
+            text = "タブ"
+            setTextColor(Color.LTGRAY)
+            textSize = 12f
+            setPadding(dp(12), dp(8), dp(12), dp(0))
+        }
+
     private fun buildToolbar(): LinearLayout {
         val toolbar = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -213,6 +229,7 @@ class DebugDrawerView(
         val text = BehaviorAuditLog.dumpAsText()
         logText.text = text.ifBlank { "(記録なし)" }
         refreshPermissions()
+        tabBarView?.refresh()
     }
 
     /** ドロワーが開いている間だけ1秒間隔で自動更新する */
