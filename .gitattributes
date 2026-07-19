@@ -1,0 +1,6 @@
+# gradle-wrapper.jar等のバイナリファイルが、gitの改行コード変換(autocrlf等)で
+# 意図せず書き換えられ、チェックサムがずれることを防ぐ。
+*.jar binary
+*.apk binary
+*.png binary
+*.jpg binary

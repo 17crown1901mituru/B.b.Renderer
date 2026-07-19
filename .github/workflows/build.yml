@@ -1,0 +1,68 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20  # フリーズ対策(初回・キャッシュなしでも収まる余裕を確保)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify no NDK/C++ files (project policy)
+        run: |
+          if find . -name "CMakeLists.txt" -o -name "*.cpp" -o -name "*.cc" | grep -q .; then
+            echo "::error::CMakeLists.txt or C++ sources found. This project is Java/Kotlin-only."
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Set current date
+        run: |
+          echo "BUILD_DATE=$(TZ='Asia/Tokyo' date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
+
+      - name: Rename APK file
+        run: |
+          cd app/build/outputs/apk/debug/
+          mv app-debug.apk "app-debug-${{ env.BUILD_DATE }}.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "bb-renderer-debug-${{ env.BUILD_DATE }}"
+          path: "app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk"
+          retention-days: 1  # ゴミ箱掃除の手間を省く

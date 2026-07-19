@@ -1,0 +1,161 @@
+package com.B.b.Renderer.render.gpu
+
+import android.opengl.GLES30
+import android.opengl.GLSurfaceView
+import android.opengl.Matrix
+import com.B.b.Renderer.core.Element
+import com.B.b.Renderer.core.MediaElement
+import com.B.b.Renderer.core.TextNode
+import com.B.b.Renderer.input.resolvePaintOrder
+import com.B.b.Renderer.layout.LayoutEngine
+import com.B.b.Renderer.media.JsMediaElement
+import com.B.b.Renderer.style.Display
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
+
+class GLEngineRenderer(
+    private val layoutEngine: LayoutEngine,
+) : GLSurfaceView.Renderer {
+
+    private val quadRenderer = QuadBatchRenderer()
+    private val atlasQuadRenderer = AtlasQuadRenderer()
+    private val oesQuadRenderer = OesQuadRenderer()
+    private val textTextureCache = TextTextureCache()
+
+    /** seq -> OES外部テクスチャID。動画要素ごとに1枚、初回描画時に確保する。 */
+    private val videoTextureIds = mutableMapOf<Long, Int>()
+
+    private val mvpMatrix = FloatArray(16)
+    private val videoTexMatrix = FloatArray(16)
+    private var viewportWidth = 1
+    private var viewportHeight = 1
+
+    override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        GLES30.glClearColor(1f, 1f, 1f, 1f)
+        quadRenderer.init()
+        atlasQuadRenderer.init()
+        oesQuadRenderer.init()
+    }
+
+    override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        viewportWidth = width.coerceAtLeast(1)
+        viewportHeight = height.coerceAtLeast(1)
+        GLES30.glViewport(0, 0, viewportWidth, viewportHeight)
+        // 左上原点・Y下向きのレイアウト座標系をそのままNDCへ写像する正射影
+        Matrix.orthoM(
+            mvpMatrix, 0,
+            0f, viewportWidth.toFloat(),
+            viewportHeight.toFloat(), 0f,
+            -1f, 1f,
+        )
+    }
+
+    override fun onDrawFrame(gl: GL10?) {
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+
+        val root = layoutEngine.root
+        val paintOrder = resolvePaintOrder(root)
+
+        quadRenderer.beginFrame(maxQuads = paintOrder.size + 8)
+        val textDraws = mutableListOf<Pair<Element, TextTextureCache.Entry>>()
+        val videoDraws = mutableListOf<Pair<Element, Int>>() // element, oesTextureId
+
+        paintOrder.forEach { element ->
+            val style = element.computedStyle
+            if (style.display == Display.NONE) return@forEach
+
+            val rect = element.computedRect
+            if (style.backgroundColor.a > 0) {
+                quadRenderer.addQuad(
+                    x = rect.x.toFloat(),
+                    y = rect.y.toFloat(),
+                    width = rect.width.toFloat(),
+                    height = rect.height.toFloat(),
+                    r = style.backgroundColor.r / 255f,
+                    g = style.backgroundColor.g / 255f,
+                    b = style.backgroundColor.b / 255f,
+                    a = style.backgroundColor.a / 255f,
+                )
+            }
+
+            if (element is MediaElement) {
+                val controller = element.mediaController as? JsMediaElement
+                // isVideoElementで判定する(hasVideoSurfaceは再生開始後にしかtrueにならず、
+                // それだとbindTextureIdが一生呼ばれず再生側のpendingSurfacePlayerが解消しない)
+                if (controller != null && controller.isVideoElement) {
+                    val textureId = videoTextureIds.getOrPut(element.seq) {
+                        oesQuadRenderer.createOesTexture().also { controller.bindTextureId(it) }
+                    }
+                    if (controller.updateTexImage(videoTexMatrix)) {
+                        videoDraws.add(element to textureId)
+                    }
+                }
+                // videoは自前でフレームを描くため、子ノード(フォールバック用テキスト等)のテキスト抽出はスキップ
+                return@forEach
+            }
+
+            val text = element.children.filterIsInstance<TextNode>()
+                .joinToString(" ") { it.data.trim() }
+                .trim()
+            if (text.isNotEmpty()) {
+                val colorArgb = android.graphics.Color.argb(
+                    style.color.a, style.color.r, style.color.g, style.color.b,
+                )
+                val entry = textTextureCache.getOrCreate(
+                    seq = element.seq,
+                    text = text,
+                    fontSizePx = style.fontSize,
+                    colorArgb = colorArgb,
+                )
+                if (entry != null) {
+                    textDraws.add(element to entry)
+                }
+            }
+        }
+
+        quadRenderer.endFrameAndDraw(mvpMatrix)
+
+        // ページ(通常1〜数枚)ごとにグルーピングし、ページにつき1 drawCallでまとめて描画する。
+        // 以前は「テキスト要素数」だけdrawCallが出ていたが、これで「アトラスページ数」に減る。
+        textDraws.groupBy { it.second.atlasPageIndex }.forEach { (pageIndex, drawsInPage) ->
+            atlasQuadRenderer.beginBatch(maxQuads = drawsInPage.size)
+            drawsInPage.forEach { (element, entry) ->
+                val rect = element.computedRect
+                val style = element.computedStyle
+                atlasQuadRenderer.addQuad(
+                    x = rect.x.toFloat() + style.padding.left,
+                    y = rect.y.toFloat() + style.padding.top,
+                    width = entry.width.toFloat(),
+                    height = entry.height.toFloat(),
+                    region = entry.region,
+                )
+            }
+            atlasQuadRenderer.endBatchAndDraw(
+                textureId = textTextureCache.getPageTextureId(pageIndex),
+                mvpMatrix = mvpMatrix,
+            )
+        }
+
+        // 動画フレームはサンプラー型が異なる(samplerExternalOES)ため専用パスで最後に描画
+        videoDraws.forEach { (element, oesTextureId) ->
+            val rect = element.computedRect
+            oesQuadRenderer.draw(
+                x = rect.x.toFloat(),
+                y = rect.y.toFloat(),
+                width = rect.width.toFloat(),
+                height = rect.height.toFloat(),
+                oesTextureId = oesTextureId,
+                texMatrix = videoTexMatrix,
+                mvpMatrix = mvpMatrix,
+            )
+        }
+    }
+
+    fun releaseResources() {
+        textTextureCache.releaseAll()
+        if (videoTextureIds.isNotEmpty()) {
+            oesQuadRenderer.deleteTextures(videoTextureIds.values.toIntArray())
+            videoTextureIds.clear()
+        }
+    }
+}
