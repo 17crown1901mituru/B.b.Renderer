@@ -15,7 +15,25 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        create("githubActionsSign") {
+            val envFile = System.getenv("KEYSTORE_FILE")
+            if (!envFile.isNullOrEmpty() && file(envFile).exists()) {
+                storeFile = file(envFile)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            // GitHub Actions上でのビルド時のみ、固定の署名を適用する
+            if (!System.getenv("KEYSTORE_FILE").isNullOrEmpty()) {
+                signingConfig = signingConfigs.getByName("githubActionsSign")
+            }
+        }
         release {
             isMinifyEnabled = false
         }
@@ -36,7 +54,6 @@ android {
 }
 
 dependencies {
-    // --- コアUI ---
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.drawerlayout:drawerlayout:1.2.0") // デバッグドロワー用

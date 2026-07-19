@@ -59,7 +59,7 @@ class EngineActivity : AppCompatActivity() {
         const val EXTRA_URL = "com.B.b.Renderer.EXTRA_URL"
         private const val PREFS_NAME = "engine_settings"
         private const val PREF_KEY_HOME_URL = "home_url"
-        private const val DEFAULT_URL = "https://example.com/"
+        private const val DEFAULT_URL = "https://DuckDuckGo.com/"
     }
 
     private val sitePermissions by lazy { SitePermissions(this) }

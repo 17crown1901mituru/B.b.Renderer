@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20  # フリーズ対策(初回・キャッシュなしでも収まる余裕を確保)
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -48,8 +48,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/B.b-key.jks
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
+        env:
+          KEYSTORE_FILE: B.b-key.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
 
       - name: Set current date
         run: |
@@ -65,4 +75,4 @@ jobs:
         with:
           name: "bb-renderer-debug-${{ env.BUILD_DATE }}"
           path: "app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk"
-          retention-days: 1  # ゴミ箱掃除の手間を省く
+          retention-days: 1
