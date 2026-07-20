@@ -24,10 +24,17 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
     }
 
     override fun attach(engine: LayoutEngine) {
-        val renderer = GLEngineRenderer(engine)
-        glRenderer = renderer
-        setRenderer(renderer)
-        renderMode = RENDERMODE_WHEN_DIRTY
+        val existingRenderer = glRenderer
+        if (existingRenderer == null) {
+            val renderer = GLEngineRenderer(engine)
+            glRenderer = renderer
+            setRenderer(renderer)
+            renderMode = RENDERMODE_WHEN_DIRTY
+        } else {
+            // setRenderer()はインスタンスにつき1回しか呼べない(2回目以降はIllegalStateException)。
+            // rendererは使い回し、参照するLayoutEngineだけをGLスレッド上で差し替える。
+            queueEvent { existingRenderer.updateLayoutEngine(engine) }
+        }
 
         val radioGroupController = RadioGroupController()
         touchController = TouchInputController(

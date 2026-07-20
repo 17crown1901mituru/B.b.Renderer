@@ -14,7 +14,7 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
 class GLEngineRenderer(
-    private val layoutEngine: LayoutEngine,
+    private var layoutEngine: LayoutEngine,
 ) : GLSurfaceView.Renderer {
 
     private val quadRenderer = QuadBatchRenderer()
@@ -159,6 +159,18 @@ class GLEngineRenderer(
                 mvpMatrix = mvpMatrix,
             )
         }
+    }
+
+    /**
+     * 2回目以降のナビゲーション用。GLSurfaceView.setRenderer()はインスタンスにつき1回しか
+     * 呼べないため、rendererは使い回し、参照するLayoutEngineだけをここで差し替える。
+     * GLスレッド上で呼ぶこと(GLEngineView.attach()からqueueEvent経由で呼ばれる想定)。
+     * 旧ページのGPUリソース(テキストアトラス・動画テクスチャ)はseq単位で紐付いており
+     * 新ページでは再利用できないため、ここで解放して新規ページ側で作り直させる。
+     */
+    fun updateLayoutEngine(newEngine: LayoutEngine) {
+        releaseResources()
+        layoutEngine = newEngine
     }
 
     fun releaseResources() {
