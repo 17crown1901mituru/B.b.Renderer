@@ -59,7 +59,7 @@ class EngineActivity : AppCompatActivity() {
         const val EXTRA_URL = "com.B.b.Renderer.EXTRA_URL"
         private const val PREFS_NAME = "engine_settings"
         private const val PREF_KEY_HOME_URL = "home_url"
-        private const val DEFAULT_URL = "https://DuckDuckGo.com/"
+        private const val DEFAULT_URL = "https://example.com/"
     }
 
     private val sitePermissions by lazy { SitePermissions(this) }
@@ -93,6 +93,7 @@ class EngineActivity : AppCompatActivity() {
     private lateinit var tabManager: TabManager
     private lateinit var tabBarView: TabBarView
     private lateinit var pipContainer: LinearLayout
+    private lateinit var loadingIndicator: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -122,12 +123,22 @@ class EngineActivity : AppCompatActivity() {
             setPadding(dp(10), dp(6), dp(10), dp(6))
             setOnClickListener { toggleDebugDrawer() }
         }
+        loadingIndicator = View(this).apply {
+            setBackgroundColor(android.graphics.Color.parseColor("#2196F3"))
+            visibility = View.GONE
+        }
         val mainContainer = FrameLayout(this).apply {
             addView(engineViewRoot, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(
                 pipContainer,
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     gravity = Gravity.TOP or Gravity.END
+                },
+            )
+            addView(
+                loadingIndicator,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)).apply {
+                    gravity = Gravity.TOP
                 },
             )
             addView(
@@ -149,8 +160,8 @@ class EngineActivity : AppCompatActivity() {
         )
 
         tabBarView = TabBarView(this, tabManager, onTabChanged = {}).apply {
-            onTabSelected = { id -> CoroutineScope(Dispatchers.Main).launch { switchToTab(id) } }
-            onNewTabRequested = { CoroutineScope(Dispatchers.Main).launch { openNewTab(DEFAULT_URL) } }
+            onTabSelected = { id -> switchToTab(id) }
+            onNewTabRequested = { openNewTab(DEFAULT_URL) }
             onPinToggleRequested = { id, pin -> tabManager.setPinned(id, pin); tabBarView.refresh(); syncKeepAliveService() }
             onPipToggleRequested = { id, show -> tabManager.setShowAsPip(id, show); refreshPipOverlays(); tabBarView.refresh() }
             onCloseRequested = { id -> closeTab(id) }
@@ -168,10 +179,15 @@ class EngineActivity : AppCompatActivity() {
                     capabilityBridge.releaseWakeLock()
                 }
             },
-            onNavigateRequested = { url -> CoroutineScope(Dispatchers.Main).launch { navigateForegroundTo(url) } },
+            onNavigateRequested = { url -> navigateForegroundTo(url) },
             currentUrlProvider = { currentPageUrl },
             tabBarView = tabBarView,
-        )
+        ).apply {
+            onBackRequested = { goBack() }
+            onForwardRequested = { goForward() }
+            onReloadRequested = { reloadCurrentTab() }
+            onStopRequested = { stopLoading() }
+        }
         val drawerParams = DrawerLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT)
         drawerParams.gravity = Gravity.END
         drawerLayout.addView(debugDrawer, drawerParams)
@@ -182,6 +198,34 @@ class EngineActivity : AppCompatActivity() {
         this.debugDrawerLayout = drawerLayout
 
         setContentView(drawerLayout)
+
+        // targetSdk 35はedge-to-edgeが既定(システムバーの裏まで描画される)。
+        // 今まで一切insetsを処理していなかったため、ドロワーの上端がステータスバーに、
+        // 下端がナビゲーションバーに被って操作しづらくなっていた。ドロワー自体に
+        // システムバー分のパディングを入れる(コンテンツ側のengineViewRootは
+        // ページ自体をシステムバーの裏まで見せたい場合もあるため、あえて触らない)。
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(debugDrawer) { view, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            view.setPadding(view.paddingLeft, bars.top, view.paddingRight, bars.bottom)
+            insets
+        }
+        // 右下トグルボタンもナビゲーションバーに埋もれないよう、下マージンをインセット分だけ足す
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(drawerToggleButton) { view, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            val params = view.layoutParams as FrameLayout.LayoutParams
+            params.bottomMargin = dp(12) + bars.bottom
+            params.rightMargin = dp(12) + bars.right
+            view.layoutParams = params
+            insets
+        }
+
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(loadingIndicator) { view, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            val params = view.layoutParams as FrameLayout.LayoutParams
+            params.topMargin = bars.top
+            view.layoutParams = params
+            insets
+        }
 
         // アプリ全体設定(ユーザー起因)は起動時点で即反映する(トグル操作を待たない)
         if (globalSettings.userKeepScreenOn) capabilityBridge.requestWakeLock("", fromUser = true)
@@ -198,9 +242,22 @@ class EngineActivity : AppCompatActivity() {
             }
         }
 
-        CoroutineScope(Dispatchers.Main).launch {
-            openNewTab(resolveInitialUrl(intent))
-        }
+        openNewTab(resolveInitialUrl(intent))
+
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    ::debugDrawerLayout.isInitialized && debugDrawerLayout.isDrawerOpen(Gravity.END) ->
+                        debugDrawerLayout.closeDrawer(Gravity.END)
+                    tabManager.canGoBack() -> goBack()
+                    else -> {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                        isEnabled = true
+                    }
+                }
+            }
+        })
     }
 
     fun toggleDebugDrawer() {
@@ -216,9 +273,7 @@ class EngineActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        CoroutineScope(Dispatchers.Main).launch {
-            navigateForegroundTo(resolveInitialUrl(intent))
-        }
+        navigateForegroundTo(resolveInitialUrl(intent))
     }
 
     private fun resolveInitialUrl(intent: Intent): String {
@@ -231,31 +286,75 @@ class EngineActivity : AppCompatActivity() {
     }
 
     // --- タブ操作 ---
+    // 以下は全て「1つの読み込みジョブ」に統一する: 新しい操作が来たら前のジョブは
+    // キャンセルし(=読み込み中止に相当)、読み込み中はloadingIndicatorを表示する。
+
+    private var loadingJob: kotlinx.coroutines.Job? = null
+
+    private fun setLoading(loading: Boolean) {
+        if (::loadingIndicator.isInitialized) {
+            loadingIndicator.visibility = if (loading) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun runNavigation(block: suspend () -> TabSession?) {
+        loadingJob?.cancel()
+        setLoading(true)
+        loadingJob = CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val session = block()
+                if (session != null) {
+                    applyForeground(session)
+                    tabBarView.refresh()
+                    refreshPipOverlays()
+                    syncKeepAliveService()
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // 中止(cancel)は正常系。ここで握りつぶすとjoinやfinallyの扱いが崩れる
+            } finally {
+                setLoading(false)
+            }
+        }
+    }
+
+    /** 読み込み中止。ユーザーが「×」を押した場合に呼ぶ。 */
+    private fun stopLoading() {
+        loadingJob?.cancel()
+        setLoading(false)
+    }
+
+    private fun goBack() {
+        if (!tabManager.canGoBack()) return
+        runNavigation { tabManager.goBack() }
+    }
+
+    private fun goForward() {
+        if (!tabManager.canGoForward()) return
+        runNavigation { tabManager.goForward() }
+    }
+
+    private fun reloadCurrentTab() {
+        runNavigation { tabManager.reloadForeground() }
+    }
 
     /** 同じタブ内でのページ遷移(リンクを踏む、device shortcutsのnavigateTo等)。 */
-    private suspend fun navigateForegroundTo(url: String) {
+    private fun navigateForegroundTo(url: String) {
         capabilityBridge.releaseWakeLock()
         capabilityBridge.unlockOrientation()
-        val session = tabManager.navigateForeground(url)
-        applyForeground(session)
+        runNavigation { tabManager.navigateForeground(url) }
     }
 
     /** 新しいタブを開いてフォアグラウンドにする(+ボタン、初回起動)。 */
-    private suspend fun openNewTab(url: String) {
+    private fun openNewTab(url: String) {
         capabilityBridge.releaseWakeLock()
         capabilityBridge.unlockOrientation()
-        val session = tabManager.openNewForeground(url)
-        applyForeground(session)
-        tabBarView.refresh()
+        runNavigation { tabManager.openNewForeground(url) }
     }
 
     /** 既存タブ(pinnedで生きている、または休止中)をフォアグラウンドに切り替える。 */
-    private suspend fun switchToTab(id: Long) {
+    private fun switchToTab(id: Long) {
         if (id == tabManager.foregroundId) return
-        val session = tabManager.switchForeground(id)
-        applyForeground(session)
-        tabBarView.refresh()
-        refreshPipOverlays()
+        runNavigation { tabManager.switchForeground(id) }
     }
 
     private fun closeTab(id: Long) {
@@ -266,9 +365,7 @@ class EngineActivity : AppCompatActivity() {
         syncKeepAliveService()
         if (wasForeground) {
             val fallback = tabManager.allTabIds().firstOrNull()
-            CoroutineScope(Dispatchers.Main).launch {
-                if (fallback != null) switchToTab(fallback) else openNewTab(DEFAULT_URL)
-            }
+            if (fallback != null) switchToTab(fallback) else openNewTab(DEFAULT_URL)
         }
     }
 
@@ -295,7 +392,7 @@ class EngineActivity : AppCompatActivity() {
         rootProvider = { tabManager.foregroundSession()?.layoutEngine?.root ?: error("No foreground tab") },
         domContextProvider = { tabManager.foregroundSession()?.jsDomContext ?: error("No foreground tab") },
         registryProvider = { tabManager.foregroundSession()?.jsEngine?.registry ?: error("No foreground tab") },
-        onNavigate = { navUrl -> CoroutineScope(Dispatchers.Main).launch { navigateForegroundTo(navUrl) } },
+        onNavigate = { navUrl -> runOnUiThread { navigateForegroundTo(navUrl) } },
         onBookmark = { _, _ ->
             // TODO: ブックマークストアは未実装。実装され次第ここから呼ぶ。
         },

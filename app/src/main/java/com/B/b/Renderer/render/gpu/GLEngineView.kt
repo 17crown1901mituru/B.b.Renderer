@@ -32,6 +32,7 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
         val radioGroupController = RadioGroupController()
         touchController = TouchInputController(
             root = engine.root,
+            layoutEngine = engine,
             radioGroupController = radioGroupController,
             onClick = { target ->
                 com.B.b.Renderer.debug.BehaviorAuditLog.record(
@@ -46,6 +47,7 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
         com.B.b.Renderer.render.installDomAccessibility(
             hostView = this,
             rootProvider = { engine.root },
+            scrollYProvider = { engine.scrollY },
             onActivate = { target -> dispatchClick(target) { hxNode -> onHtmxTrigger?.invoke(hxNode) } },
         )
         requestLayoutPass()

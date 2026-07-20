@@ -205,6 +205,19 @@ class DebugDrawerView(
     }
 
     private fun buildAddressBar(): LinearLayout {
+        val column = LinearLayout(context).apply { orientation = VERTICAL }
+
+        val navRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(4), dp(8), 0)
+        }
+        navRow.addView(smallButton("←") { onBackRequested?.invoke() })
+        navRow.addView(smallButton("→") { onForwardRequested?.invoke() })
+        navRow.addView(smallButton("更新") { onReloadRequested?.invoke() })
+        navRow.addView(smallButton("×中止") { onStopRequested?.invoke() })
+        column.addView(navRow)
+
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -225,8 +238,14 @@ class DebugDrawerView(
         row.addView(smallButton("移動") { submitAddressBar() })
         // 現在のURLをアドレスバーに反映しておく(タブ切替時等はrefresh()から呼ばれる)
         currentDomainProvider?.let { addressBarInput.hint = "URLまたは検索語句" }
-        return row
+        column.addView(row)
+        return column
     }
+
+    var onBackRequested: (() -> Unit)? = null
+    var onForwardRequested: (() -> Unit)? = null
+    var onReloadRequested: (() -> Unit)? = null
+    var onStopRequested: (() -> Unit)? = null
 
     private fun submitAddressBar() {
         val input = addressBarInput.text.toString().trim()

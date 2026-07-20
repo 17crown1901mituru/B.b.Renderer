@@ -14,11 +14,29 @@ import com.B.b.Renderer.style.Position
 class LayoutEngine(
     val root: Element,
     private val viewportWidth: Float,
-    private val viewportHeight: Float,
+    val viewportHeight: Float,
 ) {
     var currentPath: String = ""
     private var layoutPassScheduled = false
     private var onFrameRequested: (() -> Unit)? = null
+
+    /** ページ全体の高さ(直近のlayoutパス結果)。ビューポートより長い分がスクロール可能域になる */
+    var contentHeight: Float = 0f
+        private set
+
+    /** 現在の縦スクロール位置(0 = 先頭)。描画・ヒットテスト双方でこの値を差し引く/加算する */
+    var scrollY: Float = 0f
+        private set
+
+    fun scrollBy(deltaY: Float) {
+        scrollY += deltaY
+        clampScroll()
+    }
+
+    private fun clampScroll() {
+        val maxScroll = (contentHeight - viewportHeight).coerceAtLeast(0f)
+        scrollY = scrollY.coerceIn(0f, maxScroll)
+    }
 
     /** Choreographer等、フレーム同期の仕組みを外部から注入する */
     fun setFrameScheduler(callback: (() -> Unit) -> Unit) {
@@ -44,7 +62,8 @@ class LayoutEngine(
     }
 
     fun runLayoutPass() {
-        layoutBlock(root, availableWidth = viewportWidth, originX = 0f, originY = 0f)
+        contentHeight = layoutBlock(root, availableWidth = viewportWidth, originX = 0f, originY = 0f)
+        clampScroll() // レイアウトのやり直しで内容が短くなった場合、はみ出したscrollYを戻す
     }
 
     // ---- Box model計算 ----
@@ -95,7 +114,12 @@ class LayoutEngine(
         )
 
         element.dirty = DirtyLevel.CLEAN
-        return originY + totalHeight + style.margin.top + style.margin.bottom
+        // 注意: totalHeightの算出には既にstyle.margin.topがcursorYの初期値経由で
+        // 織り込まれている。margin.bottomは呼び出し元(cursorY = childBottom + margin.bottom)
+        // 側で加算する設計なので、ここではoriginY + totalHeightのみを返す
+        // (以前はmargin.top/bottomを二重加算しており、兄弟要素が想定より下にずれる/
+        // 詰まって重なるバグの一因になっていた)。
+        return originY + totalHeight
     }
 
     private fun layoutInlineText(

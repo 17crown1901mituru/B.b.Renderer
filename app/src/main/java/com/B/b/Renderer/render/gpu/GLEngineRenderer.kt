@@ -41,16 +41,26 @@ class GLEngineRenderer(
         viewportWidth = width.coerceAtLeast(1)
         viewportHeight = height.coerceAtLeast(1)
         GLES30.glViewport(0, 0, viewportWidth, viewportHeight)
-        // 左上原点・Y下向きのレイアウト座標系をそのままNDCへ写像する正射影
+    }
+
+    /**
+     * 正射影の上下端をscrollY分だけシフトすることでスクロールを表現する
+     * (Canvas版のcanvas.translate(0, -scrollY)に相当)。毎フレーム呼ぶ必要があるため
+     * onSurfaceChangedからonDrawFrameへ移した(以前はリサイズ時にしか再計算されず、
+     * スクロール自体が反映されなかった)。
+     */
+    private fun updateProjection() {
+        val scrollY = layoutEngine.scrollY
         Matrix.orthoM(
             mvpMatrix, 0,
             0f, viewportWidth.toFloat(),
-            viewportHeight.toFloat(), 0f,
+            viewportHeight.toFloat() + scrollY, scrollY,
             -1f, 1f,
         )
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        updateProjection()
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
 
         val root = layoutEngine.root

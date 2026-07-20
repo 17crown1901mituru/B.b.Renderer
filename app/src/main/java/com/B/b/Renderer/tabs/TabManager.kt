@@ -22,6 +22,8 @@ class TabManager(
 
     private val dormantUrls = mutableMapOf<Long, String>() // 休止中タブ: id -> url(再開時に使う)
     private val sessions = mutableMapOf<Long, TabSession>() // 現在エンジンを持っている(pinned or foreground)タブ
+    private val historyBack = mutableMapOf<Long, MutableList<String>>()
+    private val historyForward = mutableMapOf<Long, MutableList<String>>()
     private var nextId = 1L
     var foregroundId: Long = -1L
         private set
@@ -40,13 +42,56 @@ class TabManager(
         sessions.filterKeys { it != foregroundId }.values.filter { it.showAsPip }
     fun foregroundSession(): TabSession? = sessions[foregroundId]
 
+    fun canGoBack(): Boolean = historyBack[foregroundId]?.isNotEmpty() == true
+    fun canGoForward(): Boolean = historyForward[foregroundId]?.isNotEmpty() == true
+
     /** 同じタブ内でのページ遷移(リンクを踏む等)。タブは増えず、中身だけ差し替わる。 */
     suspend fun navigateForeground(url: String): TabSession {
         val id = if (foregroundId == -1L) nextId++ else foregroundId
+        sessions[id]?.let { current ->
+            historyBack.getOrPut(id) { mutableListOf() }.add(current.url)
+            historyForward[id]?.clear() // 新規遷移でforward履歴は破棄(実ブラウザと同じ)
+        }
         sessions[id]?.dispose()
         val session = sessionFactory(url)
         sessions[id] = session
         foregroundId = id
+        return session
+    }
+
+    /** 現在のURLのまま作り直す(履歴には触らない)。 */
+    suspend fun reloadForeground(): TabSession? {
+        val id = foregroundId
+        val url = sessions[id]?.url ?: return null
+        sessions[id]?.dispose()
+        val session = sessionFactory(url)
+        sessions[id] = session
+        return session
+    }
+
+    suspend fun goBack(): TabSession? {
+        val id = foregroundId
+        val back = historyBack[id]
+        if (back.isNullOrEmpty()) return null
+        val currentUrl = sessions[id]?.url ?: return null
+        val previousUrl = back.removeAt(back.size - 1)
+        historyForward.getOrPut(id) { mutableListOf() }.add(currentUrl)
+        sessions[id]?.dispose()
+        val session = sessionFactory(previousUrl)
+        sessions[id] = session
+        return session
+    }
+
+    suspend fun goForward(): TabSession? {
+        val id = foregroundId
+        val forward = historyForward[id]
+        if (forward.isNullOrEmpty()) return null
+        val currentUrl = sessions[id]?.url ?: return null
+        val nextUrl = forward.removeAt(forward.size - 1)
+        historyBack.getOrPut(id) { mutableListOf() }.add(currentUrl)
+        sessions[id]?.dispose()
+        val session = sessionFactory(nextUrl)
+        sessions[id] = session
         return session
     }
 
@@ -123,6 +168,8 @@ class TabManager(
     fun closeTab(id: Long) {
         sessions.remove(id)?.dispose()
         dormantUrls.remove(id)
+        historyBack.remove(id)
+        historyForward.remove(id)
         if (foregroundId == id) foregroundId = -1L
     }
 }

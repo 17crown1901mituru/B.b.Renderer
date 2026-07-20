@@ -45,32 +45,64 @@ enum class TouchPhase { DOWN, MOVE, UP, CANCEL }
 
 /**
  * タッチのライフサイクル管理。down/upが同一要素上で完結した場合のみクリック確定とする。
+ * 縦方向のドラッグはタップ候補を打ち切り、スクロールとして扱う(2026-07議論分: 元々
+ * MOVEは無視されるだけでスクロール自体が未実装だったため追加)。
  */
 class TouchInputController(
     private val root: Element,
+    private val layoutEngine: com.B.b.Renderer.layout.LayoutEngine,
     private val radioGroupController: RadioGroupController,
     private val onClick: (Element) -> Unit,
     private val requestRedraw: () -> Unit,
 ) {
     private var activePressTarget: Element? = null
+    private var downScreenY = 0f
+    private var lastScreenY = 0f
+    private var isDragging = false
+
+    companion object {
+        private const val TOUCH_SLOP_PX = 24f // これ未満の移動はタップのブレとして許容する
+    }
 
     fun onTouchEvent(phase: TouchPhase, x: Float, y: Float) {
+        // 画面上の座標(screen space)をページ内座標(page space)に変換する。
+        // computedRectはスクロールを考慮しないページ全体基準の座標なので、
+        // ヒットテストの前に必ずscrollYを足す。
+        val pageY = y + layoutEngine.scrollY
         when (phase) {
             TouchPhase.DOWN -> {
-                val hit = hitTest(root, x, y)
-                activePressTarget = hit
+                downScreenY = y
+                lastScreenY = y
+                isDragging = false
+                activePressTarget = hitTest(root, x, pageY)
+            }
+            TouchPhase.MOVE -> {
+                if (!isDragging && kotlin.math.abs(y - downScreenY) > TOUCH_SLOP_PX) {
+                    isDragging = true
+                    activePressTarget = null // ドラッグ確定したらタップ候補は取り消す
+                }
+                if (isDragging) {
+                    val deltaY = y - lastScreenY
+                    // 指を上に動かす(deltaYが負)ほど下方向へスクロールするのでscrollYは加算
+                    layoutEngine.scrollBy(-deltaY)
+                    requestRedraw()
+                }
+                lastScreenY = y
             }
             TouchPhase.UP -> {
-                val hit = hitTest(root, x, y)
-                if (hit != null && hit === activePressTarget) {
-                    handleTap(hit)
+                if (!isDragging) {
+                    val hit = hitTest(root, x, pageY)
+                    if (hit != null && hit === activePressTarget) {
+                        handleTap(hit)
+                    }
                 }
                 activePressTarget = null
+                isDragging = false
             }
             TouchPhase.CANCEL -> {
                 activePressTarget = null
+                isDragging = false
             }
-            TouchPhase.MOVE -> Unit
         }
     }
 

@@ -29,6 +29,7 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
         val radioGroupController = RadioGroupController()
         touchController = TouchInputController(
             root = engine.root,
+            layoutEngine = engine,
             radioGroupController = radioGroupController,
             onClick = { target ->
                 com.B.b.Renderer.debug.BehaviorAuditLog.record(
@@ -43,6 +44,7 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
         com.B.b.Renderer.render.installDomAccessibility(
             hostView = this,
             rootProvider = { layoutEngine?.root },
+            scrollYProvider = { layoutEngine?.scrollY ?: 0f },
             onActivate = { target -> dispatchClick(target) { hxNode -> onHtmxTrigger?.invoke(hxNode) } },
         )
         requestLayoutPass()
@@ -56,7 +58,10 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val engine = layoutEngine ?: return
+        canvas.save()
+        canvas.translate(0f, -engine.scrollY)
         renderer.render(canvas, engine.root)
+        canvas.restore()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

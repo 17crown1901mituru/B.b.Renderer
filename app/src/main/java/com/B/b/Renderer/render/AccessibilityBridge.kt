@@ -27,10 +27,11 @@ fun installDomAccessibility(
     hostView: View,
     rootProvider: () -> Element?,
     onActivate: (Element) -> Unit,
+    scrollYProvider: () -> Float = { 0f },
 ) {
     hostView.setAccessibilityDelegate(object : View.AccessibilityDelegate() {
         override fun getAccessibilityNodeProvider(host: View): AccessibilityNodeProvider =
-            DomAccessibilityNodeProvider(host, rootProvider, onActivate)
+            DomAccessibilityNodeProvider(host, rootProvider, onActivate, scrollYProvider)
     })
     hostView.isFocusable = true
     hostView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -40,6 +41,7 @@ private class DomAccessibilityNodeProvider(
     private val hostView: View,
     private val rootProvider: () -> Element?,
     private val onActivate: (Element) -> Unit,
+    private val scrollYProvider: () -> Float,
 ) : AccessibilityNodeProvider() {
 
     // virtualViewId <-> Element の対応表。createAccessibilityNodeInfo()のたびに
@@ -117,15 +119,17 @@ private class DomAccessibilityNodeProvider(
         info.text = text.ifBlank { element.attributes["aria-label"] ?: element.attributes["alt"] }
 
         val rect = element.computedRect
+        val scrollY = scrollYProvider()
         val screenLocation = IntArray(2)
         hostView.getLocationOnScreen(screenLocation)
-        info.setBoundsInParent(Rect(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height))
+        val onScreenY = rect.y - scrollY.toInt()
+        info.setBoundsInParent(Rect(rect.x, onScreenY, rect.x + rect.width, onScreenY + rect.height))
         info.setBoundsInScreen(
             Rect(
                 screenLocation[0] + rect.x,
-                screenLocation[1] + rect.y,
+                screenLocation[1] + onScreenY,
                 screenLocation[0] + rect.x + rect.width,
-                screenLocation[1] + rect.y + rect.height,
+                screenLocation[1] + onScreenY + rect.height,
             ),
         )
 
