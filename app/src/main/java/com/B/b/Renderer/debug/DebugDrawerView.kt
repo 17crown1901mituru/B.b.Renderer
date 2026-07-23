@@ -13,6 +13,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.B.b.Renderer.benchmark.RenderTierBenchmark
 import com.B.b.Renderer.permissions.GlobalAppSettings
 import com.B.b.Renderer.permissions.SitePermissions
 import com.B.b.Renderer.tabs.TabBarView
@@ -66,6 +67,11 @@ class DebugDrawerView(
         setPadding(dp(12), dp(4), dp(12), dp(4))
     }
 
+    private val benchmarkStatusText = TextView(context).apply {
+        setTextColor(Color.LTGRAY)
+        textSize = 11f
+    }
+
     private val refreshHandler = Handler(Looper.getMainLooper())
     private var autoRefresh = false
 
@@ -81,6 +87,7 @@ class DebugDrawerView(
         }
         addView(buildToolbar())
         addView(buildGlobalSettingsPanel())
+        addView(buildRenderBenchmarkPanel())
         addView(buildPermissionsHeader())
         addView(permissionsPanel)
         addView(
@@ -157,6 +164,40 @@ class DebugDrawerView(
             },
         )
         return panel
+    }
+
+    /** GPUかCanvasかの起動時判定(RenderTierBenchmark)の状態表示・手動リセット */
+    private fun buildRenderBenchmarkPanel(): LinearLayout {
+        val panel = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(8))
+        }
+        panel.addView(
+            TextView(context).apply {
+                text = "描画Tierベンチマーク"
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+            },
+        )
+        panel.addView(benchmarkStatusText)
+        panel.addView(
+            smallButton("リセットして再計測") {
+                RenderTierBenchmark.reset(context)
+                refreshBenchmarkStatus()
+            },
+        )
+        refreshBenchmarkStatus()
+        return panel
+    }
+
+    private fun refreshBenchmarkStatus() {
+        // たまたま1回だけ重かった/軽かったが結果を左右しないよう複数セッションの多数決で確定する
+        // 設計になっているため、確定前はPENDING扱いであることが分かるよう明示する。
+        benchmarkStatusText.text = when (RenderTierBenchmark.currentVerdict(context)) {
+            RenderTierBenchmark.Verdict.UNKNOWN -> "判定中(複数回の起動で確定します)"
+            RenderTierBenchmark.Verdict.GPU_OK -> "GPU描画で確定済み"
+            RenderTierBenchmark.Verdict.GPU_SLOW -> "この端末には重いためCanvas描画に固定済み"
+        }
     }
 
     private fun buildPermissionsHeader(): TextView =
@@ -307,6 +348,7 @@ class DebugDrawerView(
         val text = BehaviorAuditLog.dumpAsText()
         logText.text = text.ifBlank { "(記録なし)" }
         refreshPermissions()
+        refreshBenchmarkStatus()
         tabBarView?.refresh()
         if (!addressBarInput.isFocused) {
             currentUrlProvider?.invoke()?.let { addressBarInput.setText(it) }

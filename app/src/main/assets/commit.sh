@@ -1,6 +1,6 @@
 #!/bin/bash
 
-mkdir B.b.Renderer
+mkdir -p /data/data/com.termux/files/home/B.b.Renderer
 
 # 常に自分自身が置かれているディレクトリを基準に動くようにする
 cd "$(dirname "$(readlink -f "$0")")"
