@@ -26,7 +26,7 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
     override fun attach(engine: LayoutEngine) {
         val existingRenderer = glRenderer
         if (existingRenderer == null) {
-            val renderer = GLEngineRenderer(engine)
+            val renderer = GLEngineRenderer(context.applicationContext, engine)
             glRenderer = renderer
             setRenderer(renderer)
             renderMode = RENDERMODE_WHEN_DIRTY
@@ -81,6 +81,12 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        queueEvent { glRenderer?.releaseResources() }
+        // queueEvent()自体がGLSurfaceView内部のGLThreadに触るため、setRenderer()が
+        // 一度も呼ばれていない(=attach()未完了、glRendererがまだnull)状態で呼ぶと
+        // GLThreadがnullでNullPointerExceptionになる。ラムダ内のnullチェックだけでは
+        // 防げない(queueEvent呼び出し自体がクラッシュする)ため、外側でガードする。
+        if (glRenderer != null) {
+            queueEvent { glRenderer?.releaseResources() }
+        }
     }
 }
