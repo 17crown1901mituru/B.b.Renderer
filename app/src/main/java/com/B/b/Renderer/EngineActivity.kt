@@ -13,6 +13,8 @@ import androidx.drawerlayout.widget.DrawerLayout
 import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.core.FormControlElement
 import com.B.b.Renderer.core.HtmlFragmentParser
+import com.B.b.Renderer.data.BookmarkStore
+import com.B.b.Renderer.data.HistoryStore
 import com.B.b.Renderer.debug.BehaviorAuditLog
 import com.B.b.Renderer.debug.DebugDrawerView
 import com.B.b.Renderer.device.DeviceScriptEngine
@@ -66,6 +68,8 @@ class EngineActivity : AppCompatActivity() {
     private val globalSettings by lazy { GlobalAppSettings(this) }
     private val capabilityBridge by lazy { BrowserCapabilityBridge(this, sitePermissions, globalSettings) }
     private val thermalGuard by lazy { ThermalGuard(this) }
+    private val historyStore by lazy { HistoryStore(this) }
+    private val bookmarkStore by lazy { BookmarkStore(this) }
     private var currentPageUrl: String = ""
 
     private val okHttpClient by lazy {
@@ -171,6 +175,8 @@ class EngineActivity : AppCompatActivity() {
             context = this,
             sitePermissions = sitePermissions,
             globalSettings = globalSettings,
+            historyStore = historyStore,
+            bookmarkStore = bookmarkStore,
             currentDomainProvider = { sitePermissions.domainOf(currentPageUrl) },
             onGlobalSettingsChanged = {
                 if (globalSettings.userKeepScreenOn) {
@@ -181,6 +187,7 @@ class EngineActivity : AppCompatActivity() {
             },
             onNavigateRequested = { url -> navigateForegroundTo(url) },
             currentUrlProvider = { currentPageUrl },
+            currentTitleProvider = { tabManager.foregroundSession()?.title ?: currentPageUrl },
             tabBarView = tabBarView,
         ).apply {
             onBackRequested = { goBack() }
@@ -386,6 +393,16 @@ class EngineActivity : AppCompatActivity() {
         engineHost.attach(session.layoutEngine)
         engineHost.onHtmxTrigger = session.onHtmxTrigger
         currentPageUrl = session.url
+        recordHistoryVisit(session.url, session.title)
+    }
+
+    /**
+     * 履歴への記録。SQLite書き込みはメインスレッドから外す。
+     * シークレットタブ運用を入れる場合はここでtabManager側のフラグを見て早期returnすればよい(TODO)。
+     */
+    private fun recordHistoryVisit(url: String, title: String) {
+        if (url.isBlank()) return
+        CoroutineScope(Dispatchers.IO).launch { historyStore.recordVisit(url, title) }
     }
 
     private fun buildShortcutApi(): ShortcutApi = ShortcutApi(
@@ -393,8 +410,8 @@ class EngineActivity : AppCompatActivity() {
         domContextProvider = { tabManager.foregroundSession()?.jsDomContext ?: error("No foreground tab") },
         registryProvider = { tabManager.foregroundSession()?.jsEngine?.registry ?: error("No foreground tab") },
         onNavigate = { navUrl -> runOnUiThread { navigateForegroundTo(navUrl) } },
-        onBookmark = { _, _ ->
-            // TODO: ブックマークストアは未実装。実装され次第ここから呼ぶ。
+        onBookmark = { title, url ->
+            CoroutineScope(Dispatchers.IO).launch { bookmarkStore.add(url, title) }
         },
         currentUrlProvider = { tabManager.foregroundSession()?.layoutEngine?.currentPath ?: "" },
     )
@@ -494,7 +511,9 @@ class EngineActivity : AppCompatActivity() {
                 htmxEngine = htmxEngine,
                 jsDomContext = jsDomContext,
                 onHtmxTrigger = sharedHtmxTrigger,
-            )
+            ).apply {
+                pageTitle = runCatching { htmlParser.extractTitle(html) }.getOrNull()
+            }
         }
     }
 

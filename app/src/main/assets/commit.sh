@@ -9,6 +9,9 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 SOURCE_DIR="/storage/emulated/0/Download/B.b.Renderer"
 REPO_DIR="/data/data/com.termux/files/home/B.b.Renderer"
+# ビルド成果物(APK)の保存先。SOURCE_DIR(git syncの元になる作業ディレクトリ)とは
+# 別にしておき、ダウンロードしたAPKで作業ツリーが汚れないようにする。
+APK_DOWNLOAD_DIR="/storage/emulated/0/Download/GitHub_Store"
 
 # 不正な空白を除去
 find "$SOURCE_DIR" -type f ! -path '*/.git/*' ! -path '*/assets/*' \
@@ -90,32 +93,32 @@ if [ -n "$(git status --porcelain)" ]; then
         # build.ymlのアップロード名(bb-renderer-debug-<BUILD_DATE>)とここでのRUN_NUMBER基準の
         # 名前がそもそも一致しない値だったため、名前を決め打ちで指定するのをやめ、
         # このRunに実際に付いているアーティファクト(1Runにつき1個のみ)をそのまま取得する。
-        gh run download "$RUN_ID" --dir "$SOURCE_DIR"
+        mkdir -p "$APK_DOWNLOAD_DIR"
+        gh run download "$RUN_ID" --dir "$APK_DOWNLOAD_DIR"
         DOWNLOAD_STATUS=$?
 
+        APK_PATH=""
         if [ $DOWNLOAD_STATUS -eq 0 ]; then
-            # gh run downloadはSOURCE_DIR/<アーティファクト名>/<ファイル>という構造で展開するため、
+            # gh run downloadはAPK_DOWNLOAD_DIR/<アーティファクト名>/<ファイル>という構造で展開するため、
             # ファイル名を決め打ちにせず、START_TIME以降に作られたapkを実体から探す。
-            APK_PATH=$(find "$SOURCE_DIR" -name "*.apk" -newermt "$START_TIME" -printf '%T@ %p\n' 2>/dev/null \
+            APK_PATH=$(find "$APK_DOWNLOAD_DIR" -name "*.apk" -newermt "$START_TIME" -printf '%T@ %p\n' 2>/dev/null \
                 | sort -n | tail -n 1 | cut -d' ' -f2-)
-            if [ -n "$APK_PATH" ]; then
-                echo "📦 APK successfully downloaded to: $APK_PATH"
-            else
-                echo "📦 Download reported success, but couldn't locate the .apk under $SOURCE_DIR"
-            fi
-        else
-            echo "⚠️ Failed to auto-download artifact via CLI."
         fi
         # ------------------------------------------------------------------
-        
-        # --- アーティファクトページ（RunのWebビュー）をブラウザで開く ---
-        echo "Opening Artifacts page in browser..."
-        RUN_URL=$(gh run view "$RUN_ID" --json url -q '.url')
-        
-        if [ -n "$RUN_URL" ]; then
-            termux-open "$RUN_URL"
+
+        if [ -n "$APK_PATH" ]; then
+            echo "📦 APK successfully downloaded to: $APK_PATH"
         else
-            echo "⚠️ Could not retrieve Run URL."
+            # 自動ダウンロードに失敗した場合のみ、手動で取得できるようArtifactsページを開く
+            echo "⚠️ Failed to auto-download artifact via CLI."
+            echo "Opening Artifacts page in browser..."
+            RUN_URL=$(gh run view "$RUN_ID" --json url -q '.url')
+
+            if [ -n "$RUN_URL" ]; then
+                termux-open "$RUN_URL"
+            else
+                echo "⚠️ Could not retrieve Run URL."
+            fi
         fi
         # --------------------------------------------------
         

@@ -23,6 +23,14 @@ class HtmlFragmentParser {
         return convert(jsoupDoc.body()) as Element
     }
 
+    /**
+     * <head><title>の中身だけを取り出す。履歴・タブ表示・ブックマークの初期タイトルに使う。
+     * parseDocument()は<head>側を破棄するため、既存のElementツリーからは取れない
+     * (別途jsoupでもう一度パースし直す。履歴記録は1回のナビゲーションにつき1回だけなので、
+     * 二重パースのコストは無視できる)。
+     */
+    fun extractTitle(html: String): String = Jsoup.parse(html).title()
+
     private fun convert(jsoupNode: org.jsoup.nodes.Node): Node = when (jsoupNode) {
         is org.jsoup.nodes.TextNode -> TextNode(jsoupNode.text())
 

@@ -32,8 +32,13 @@ class TabSession(
     /** PiP表示用の小さな描画View。showAsPip=trueの間だけ実体を持つ(CPU/Canvas固定、発熱対策)。 */
     var pipHostView: com.B.b.Renderer.render.EngineHostView? = null
 
+    /** <title>から取れた実タイトル。取れなかった/空だった場合はhost名にフォールバックする。 */
+    var pageTitle: String? = null
+
     val title: String
-        get() = runCatching { java.net.URI(url).host }.getOrNull() ?: url
+        get() = pageTitle?.takeIf { it.isNotBlank() }
+            ?: runCatching { java.net.URI(url).host }.getOrNull()
+            ?: url
 
     fun dispose() {
         jsEngine.dispose()

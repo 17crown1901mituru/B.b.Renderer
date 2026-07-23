@@ -14,6 +14,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.B.b.Renderer.benchmark.RenderTierBenchmark
+import com.B.b.Renderer.data.BookmarkStore
+import com.B.b.Renderer.data.HistoryStore
 import com.B.b.Renderer.permissions.GlobalAppSettings
 import com.B.b.Renderer.permissions.SitePermissions
 import com.B.b.Renderer.tabs.TabBarView
@@ -21,9 +23,9 @@ import com.B.b.Renderer.tabs.TabManager
 
 /**
  * BehaviorAuditLogをその場で見るためのデバッグ用サイドパネル。
- * 加えて、タブ一覧・ドメイン単位のブラウザ機能許可・アプリ全体設定もここに集約する
- * (2026-07議論分: ブラウザとしての機能・設定はドロワー側に寄せて、ページ描画領域を
- * 画面いっぱいに使えるようにする方針)。
+ * 加えて、タブ一覧・ドメイン単位のブラウザ機能許可・アプリ全体設定・履歴・ブックマークも
+ * ここに集約する(2026-07議論分: ブラウザとしての機能・設定はドロワー側に寄せて、
+ * ページ描画領域を画面いっぱいに使えるようにする方針)。
  *
  * 画面上にEngineView(ページ描画)・ソフトウェアキーボード・デバッグ表示が
  * 同時に重なるとごちゃつくため、常時表示ではなくDrawerLayoutで画面端に
@@ -37,10 +39,13 @@ class DebugDrawerView(
     context: Context,
     private val sitePermissions: SitePermissions? = null,
     private val globalSettings: GlobalAppSettings? = null,
+    private val historyStore: HistoryStore? = null,
+    private val bookmarkStore: BookmarkStore? = null,
     private val currentDomainProvider: (() -> String)? = null,
     private val onGlobalSettingsChanged: (() -> Unit)? = null,
     private val onNavigateRequested: ((String) -> Unit)? = null,
     private val currentUrlProvider: (() -> String)? = null,
+    private val currentTitleProvider: (() -> String)? = null,
     val tabBarView: TabBarView? = null,
 ) : LinearLayout(context) {
 
@@ -53,6 +58,24 @@ class DebugDrawerView(
         imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_GO
         setBackgroundColor(Color.parseColor("#333333"))
         setPadding(dp(10), dp(8), dp(10), dp(8))
+    }
+
+    private val bookmarkStarButton = Button(context).apply {
+        text = "☆"
+        textSize = 14f
+        setPadding(dp(6), 0, dp(6), 0)
+    }
+
+    private val historyPanel = LinearLayout(context).apply {
+        orientation = VERTICAL
+        setPadding(dp(12), dp(4), dp(12), dp(4))
+        visibility = GONE
+    }
+
+    private val bookmarksPanel = LinearLayout(context).apply {
+        orientation = VERTICAL
+        setPadding(dp(12), dp(4), dp(12), dp(4))
+        visibility = GONE
     }
 
     private val logText = TextView(context).apply {
@@ -88,6 +111,10 @@ class DebugDrawerView(
         addView(buildToolbar())
         addView(buildGlobalSettingsPanel())
         addView(buildRenderBenchmarkPanel())
+        addView(buildHistoryHeader())
+        addView(historyPanel)
+        addView(buildBookmarksHeader())
+        addView(bookmarksPanel)
         addView(buildPermissionsHeader())
         addView(permissionsPanel)
         addView(
@@ -200,6 +227,160 @@ class DebugDrawerView(
         }
     }
 
+    /**
+     * ボタンタップ時に同期でSQLiteへ書く。1行のinsert/delete程度の軽い処理であり、
+     * GlobalAppSettings(SharedPreferences)への同期書き込みと同様の粒度なのでUIスレッドで許容する。
+     * 履歴の記録(recordHistoryVisit)はページ遷移のたびに走るため、そちらはEngineActivity側で
+     * IOディスパッチャに逃がしている。
+     */
+    private fun toggleBookmarkForCurrentPage() {
+        val store = bookmarkStore ?: return
+        val url = currentUrlProvider?.invoke().orEmpty()
+        if (url.isBlank()) return
+        val title = currentTitleProvider?.invoke() ?: url
+        val nowBookmarked = store.toggle(url, title)
+        bookmarkStarButton.text = if (nowBookmarked) "★" else "☆"
+        refreshBookmarks()
+    }
+
+    private fun refreshBookmarkStar() {
+        val store = bookmarkStore ?: return
+        val url = currentUrlProvider?.invoke().orEmpty()
+        bookmarkStarButton.text = if (url.isNotBlank() && store.isBookmarked(url)) "★" else "☆"
+    }
+
+    private fun buildHistoryHeader(): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(0))
+        }
+        row.addView(
+            TextView(context).apply {
+                text = "履歴"
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+                layoutParams = LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        row.addView(
+            smallButton("表示/非表示") {
+                historyPanel.visibility = if (historyPanel.visibility == VISIBLE) GONE else VISIBLE
+                if (historyPanel.visibility == VISIBLE) refreshHistory()
+            },
+        )
+        row.addView(smallButton("全削除") { historyStore?.clearAll(); refreshHistory() })
+        return row
+    }
+
+    private fun refreshHistory() {
+        historyPanel.removeAllViews()
+        val store = historyStore ?: return
+        val entries = store.recent(100)
+        if (entries.isEmpty()) {
+            historyPanel.addView(
+                TextView(context).apply {
+                    text = "(履歴なし)"
+                    setTextColor(Color.GRAY)
+                    textSize = 11f
+                },
+            )
+            return
+        }
+        entries.forEach { entry ->
+            historyPanel.addView(
+                buildListRow(
+                    title = entry.title,
+                    url = entry.url,
+                    onTap = { onNavigateRequested?.invoke(entry.url) },
+                    onDelete = { store.delete(entry.id); refreshHistory() },
+                ),
+            )
+        }
+    }
+
+    private fun buildBookmarksHeader(): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(0))
+        }
+        row.addView(
+            TextView(context).apply {
+                text = "ブックマーク"
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+                layoutParams = LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        row.addView(
+            smallButton("表示/非表示") {
+                bookmarksPanel.visibility = if (bookmarksPanel.visibility == VISIBLE) GONE else VISIBLE
+                if (bookmarksPanel.visibility == VISIBLE) refreshBookmarks()
+            },
+        )
+        return row
+    }
+
+    private fun refreshBookmarks() {
+        bookmarksPanel.removeAllViews()
+        val store = bookmarkStore ?: return
+        val entries = store.list()
+        if (entries.isEmpty()) {
+            bookmarksPanel.addView(
+                TextView(context).apply {
+                    text = "(ブックマークなし)"
+                    setTextColor(Color.GRAY)
+                    textSize = 11f
+                },
+            )
+            return
+        }
+        entries.forEach { entry ->
+            bookmarksPanel.addView(
+                buildListRow(
+                    title = entry.title,
+                    url = entry.url,
+                    onTap = { onNavigateRequested?.invoke(entry.url) },
+                    onDelete = { store.delete(entry.id); refreshBookmarks(); refreshBookmarkStar() },
+                ),
+            )
+        }
+    }
+
+    /** 履歴・ブックマーク共通の1行分の見た目: タップで遷移、×で削除。 */
+    private fun buildListRow(title: String, url: String, onTap: () -> Unit, onDelete: () -> Unit): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        val textColumn = LinearLayout(context).apply {
+            orientation = VERTICAL
+            layoutParams = LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { onTap() }
+        }
+        textColumn.addView(
+            TextView(context).apply {
+                text = title.ifBlank { url }
+                setTextColor(Color.WHITE)
+                textSize = 12f
+                maxLines = 1
+            },
+        )
+        textColumn.addView(
+            TextView(context).apply {
+                text = url
+                setTextColor(Color.GRAY)
+                textSize = 10f
+                maxLines = 1
+            },
+        )
+        row.addView(textColumn)
+        row.addView(smallButton("×") { onDelete() })
+        return row
+    }
+
     private fun buildPermissionsHeader(): TextView =
         TextView(context).apply {
             text = "このドメインの許可設定"
@@ -277,6 +458,8 @@ class DebugDrawerView(
             }
         }
         row.addView(smallButton("移動") { submitAddressBar() })
+        bookmarkStarButton.setOnClickListener { toggleBookmarkForCurrentPage() }
+        row.addView(bookmarkStarButton)
         // 現在のURLをアドレスバーに反映しておく(タブ切替時等はrefresh()から呼ばれる)
         currentDomainProvider?.let { addressBarInput.hint = "URLまたは検索語句" }
         column.addView(row)
@@ -349,6 +532,7 @@ class DebugDrawerView(
         logText.text = text.ifBlank { "(記録なし)" }
         refreshPermissions()
         refreshBenchmarkStatus()
+        refreshBookmarkStar()
         tabBarView?.refresh()
         if (!addressBarInput.isFocused) {
             currentUrlProvider?.invoke()?.let { addressBarInput.setText(it) }
