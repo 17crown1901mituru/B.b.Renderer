@@ -1,6 +1,6 @@
 #!/bin/bash
 
-mkdir -p /data/data/com.termux/files/home/B.b.Renderer
+mkdir B.b.Renderer
 
 # 常に自分自身が置かれているディレクトリを基準に動くようにする
 cd "$(dirname "$(readlink -f "$0")")"
@@ -87,11 +87,22 @@ if [ -n "$(git status --porcelain)" ]; then
         
         # --- 【統合ポイント2】成功したビルド番号のアーティファクトを自動ダウンロード ---
         echo "Downloading APK artifact..."
-        # 先ほど設定した Zip名「bb-renderer-debug-#番号」を指定してダウンロード
-        gh run download "$RUN_ID" --name "bb-renderer-debug-#$RUN_NUMBER" --dir "$SOURCE_DIR"
-        
-        if [ $? -eq 0 ]; then
-            echo "📦 APK successfully downloaded to: $SOURCE_DIR/app-debug-#$RUN_NUMBER.apk"
+        # build.ymlのアップロード名(bb-renderer-debug-<BUILD_DATE>)とここでのRUN_NUMBER基準の
+        # 名前がそもそも一致しない値だったため、名前を決め打ちで指定するのをやめ、
+        # このRunに実際に付いているアーティファクト(1Runにつき1個のみ)をそのまま取得する。
+        gh run download "$RUN_ID" --dir "$SOURCE_DIR"
+        DOWNLOAD_STATUS=$?
+
+        if [ $DOWNLOAD_STATUS -eq 0 ]; then
+            # gh run downloadはSOURCE_DIR/<アーティファクト名>/<ファイル>という構造で展開するため、
+            # ファイル名を決め打ちにせず、START_TIME以降に作られたapkを実体から探す。
+            APK_PATH=$(find "$SOURCE_DIR" -name "*.apk" -newermt "$START_TIME" -printf '%T@ %p\n' 2>/dev/null \
+                | sort -n | tail -n 1 | cut -d' ' -f2-)
+            if [ -n "$APK_PATH" ]; then
+                echo "📦 APK successfully downloaded to: $APK_PATH"
+            else
+                echo "📦 Download reported success, but couldn't locate the .apk under $SOURCE_DIR"
+            fi
         else
             echo "⚠️ Failed to auto-download artifact via CLI."
         fi
@@ -116,4 +127,5 @@ if [ -n "$(git status --porcelain)" ]; then
 else
     echo "No changes detected. Nothing to do."
 fi
+
 
