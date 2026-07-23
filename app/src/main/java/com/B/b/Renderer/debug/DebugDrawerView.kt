@@ -103,25 +103,33 @@ class DebugDrawerView(
         setBackgroundColor(Color.parseColor("#EE111111"))
         layoutParams = ViewGroup.LayoutParams(dp(320), ViewGroup.LayoutParams.MATCH_PARENT)
 
-        addView(buildAddressBar())
-        tabBarView?.let {
-            addView(buildTabsHeader())
-            addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // 以前はログ部分だけがScrollView(weight=1f)で、それ以外(アドレスバー・タブ・
+        // アプリ全体設定・ベンチマーク・履歴・ブックマーク・権限一覧)は固定表示だった。
+        // パネルが増えてドロワーの高さに収まりきらなくなり、下側の項目に到達できなく
+        // なっていたため、ドロワー全体を1つのScrollViewでラップする形に変更する
+        // (ScrollViewの入れ子は挙動が不安定になりやすいので避ける)。
+        val content = LinearLayout(context).apply {
+            orientation = VERTICAL
         }
-        addView(buildToolbar())
-        addView(buildGlobalSettingsPanel())
-        addView(buildRenderBenchmarkPanel())
-        addView(buildHistoryHeader())
-        addView(historyPanel)
-        addView(buildBookmarksHeader())
-        addView(bookmarksPanel)
-        addView(buildPermissionsHeader())
-        addView(permissionsPanel)
+        content.addView(buildAddressBar())
+        tabBarView?.let {
+            content.addView(buildTabsHeader())
+            content.addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        content.addView(buildToolbar())
+        content.addView(buildGlobalSettingsPanel())
+        content.addView(buildRenderBenchmarkPanel())
+        content.addView(buildHistoryHeader())
+        content.addView(historyPanel)
+        content.addView(buildBookmarksHeader())
+        content.addView(bookmarksPanel)
+        content.addView(buildPermissionsHeader())
+        content.addView(permissionsPanel)
+        content.addView(logText)
+
         addView(
-            ScrollView(context).apply {
-                addView(logText)
-            },
-            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+            ScrollView(context).apply { addView(content) },
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
 
         refresh()
