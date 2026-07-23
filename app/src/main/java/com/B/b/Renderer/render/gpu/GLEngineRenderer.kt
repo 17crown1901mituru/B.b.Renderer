@@ -1,8 +1,10 @@
 package com.B.b.Renderer.render.gpu
 
+import android.content.Context
 import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
+import com.B.b.Renderer.benchmark.RenderTierBenchmark
 import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.core.MediaElement
 import com.B.b.Renderer.core.TextNode
@@ -14,8 +16,11 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
 class GLEngineRenderer(
+    private val appContext: Context,
     private var layoutEngine: LayoutEngine,
 ) : GLSurfaceView.Renderer {
+
+    private var benchmarkThisSession = false
 
     private val quadRenderer = QuadBatchRenderer()
     private val atlasQuadRenderer = AtlasQuadRenderer()
@@ -35,6 +40,12 @@ class GLEngineRenderer(
         quadRenderer.init()
         atlasQuadRenderer.init()
         oesQuadRenderer.init()
+
+        // 未判定の端末でのみ、この新しいGLコンテキストの最初の数十フレームを計測する。
+        benchmarkThisSession = RenderTierBenchmark.shouldRunSession(appContext)
+        if (benchmarkThisSession) {
+            RenderTierBenchmark.beginSession()
+        }
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -60,6 +71,8 @@ class GLEngineRenderer(
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        val frameStartNanos = if (benchmarkThisSession) System.nanoTime() else 0L
+
         updateProjection()
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
 
@@ -158,6 +171,14 @@ class GLEngineRenderer(
                 texMatrix = videoTexMatrix,
                 mvpMatrix = mvpMatrix,
             )
+        }
+
+        if (benchmarkThisSession) {
+            // 通常のGLコマンドはキューイングされるだけで非同期に実行されるため、
+            // glFinish()でGPU側の完了を待ってから計測を止めないと「積んだだけ」の時間しか測れない。
+            // ベンチマーク中の限られたフレームだけの措置で、判定確定後は一切呼ばない。
+            GLES30.glFinish()
+            RenderTierBenchmark.recordFrame(appContext, System.nanoTime() - frameStartNanos)
         }
     }
 
