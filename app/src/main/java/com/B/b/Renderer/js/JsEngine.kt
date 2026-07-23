@@ -46,6 +46,12 @@ class JsEngine(
             ScriptableObject.putProperty(scope, "console", Context.javaToJS(window.console, scope))
             ScriptableObject.putProperty(scope, "navigator", Context.javaToJS(window.navigator, scope))
             ScriptableObject.putProperty(scope, "screen", Context.javaToJS(window.screen, scope))
+            // htmx.js等、ページ側JSは`window.location`ではなく素の`location`を直接参照することが
+            // 多い(ブラウザのグローバルスコープでは`location`===`window.location`のため)。
+            // console/navigator/screenと同様にここでも明示登録しないとReferenceErrorになる
+            // (このバグは過去に一度直した経緯があるが、別セッションの変更が本ファイルには
+            // 反映されていなかった。2026-07再発分)。
+            ScriptableObject.putProperty(scope, "location", Context.javaToJS(window.location, scope))
             ScriptableObject.putProperty(scope, "__seqOptimizer", Context.javaToJS(seqOptimizer, scope))
             // 注意: setTimeout/setIntervalは window.setTimeout(...) の形でのみ呼び出し可能。
             // 素の setTimeout(...) (グローバル関数扱い)はサポートしていない。
