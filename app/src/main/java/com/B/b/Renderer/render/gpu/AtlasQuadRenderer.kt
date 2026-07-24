@@ -18,6 +18,7 @@ class AtlasQuadRenderer {
     private var texHandle = 0
     private var vertexBuffer: FloatBuffer? = null
     private var pendingVertexCount = 0
+    private var drawErrorLogged = false
 
     private val vertexShaderSrc = """
         #version 300 es
@@ -46,6 +47,12 @@ class AtlasQuadRenderer {
         program = GpuShaderUtil.buildProgram(vertexShaderSrc, fragmentShaderSrc)
         mvpHandle = GLES30.glGetUniformLocation(program, "uMvp")
         texHandle = GLES30.glGetUniformLocation(program, "uTexture")
+
+        com.B.b.Renderer.debug.BehaviorAuditLog.record(
+            com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+            "AtlasQuadRenderer.init: program=$program mvpHandle=$mvpHandle texHandle=$texHandle " +
+                "glError=${GLES30.glGetError()}",
+        )
     }
 
     /** maxQuadsはこのフレームでこのページに描く見込みの最大quad数(小さすぎるとoverflowするので余裕を持たせる) */
@@ -106,6 +113,15 @@ class AtlasQuadRenderer {
         GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, stride, buffer)
 
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, pendingVertexCount)
+
+        if (!drawErrorLogged) {
+            drawErrorLogged = true
+            val err = GLES30.glGetError()
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "AtlasQuadRenderer.endBatchAndDraw: textureId=$textureId vertexCount=$pendingVertexCount glError=$err",
+            )
+        }
 
         GLES30.glDisableVertexAttribArray(0)
         GLES30.glDisableVertexAttribArray(1)
