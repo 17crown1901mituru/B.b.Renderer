@@ -13,8 +13,6 @@ import androidx.drawerlayout.widget.DrawerLayout
 import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.core.FormControlElement
 import com.B.b.Renderer.core.HtmlFragmentParser
-import com.B.b.Renderer.data.BookmarkStore
-import com.B.b.Renderer.data.HistoryStore
 import com.B.b.Renderer.debug.BehaviorAuditLog
 import com.B.b.Renderer.debug.DebugDrawerView
 import com.B.b.Renderer.device.DeviceScriptEngine
@@ -26,6 +24,7 @@ import com.B.b.Renderer.js.JsEngine
 import com.B.b.Renderer.layout.LayoutEngine
 import com.B.b.Renderer.permissions.BrowserCapabilityBridge
 import com.B.b.Renderer.permissions.GlobalAppSettings
+import com.B.b.Renderer.permissions.RuntimePermissionManager
 import com.B.b.Renderer.permissions.SitePermissions
 import com.B.b.Renderer.network.SimpleCookieJar
 import com.B.b.Renderer.render.EngineHostView
@@ -68,8 +67,9 @@ class EngineActivity : AppCompatActivity() {
     private val globalSettings by lazy { GlobalAppSettings(this) }
     private val capabilityBridge by lazy { BrowserCapabilityBridge(this, sitePermissions, globalSettings) }
     private val thermalGuard by lazy { ThermalGuard(this) }
-    private val historyStore by lazy { HistoryStore(this) }
-    private val bookmarkStore by lazy { BookmarkStore(this) }
+    // registerForActivityResult()はSTARTEDになる前に呼ぶ必要があるため、他のフィールドと違い
+    // by lazyにはしない(初回参照タイミングが遅れて登録できなくなる可能性があるため)。
+    private val permissionManager = RuntimePermissionManager(this)
     private var currentPageUrl: String = ""
 
     private val okHttpClient by lazy {
@@ -101,6 +101,7 @@ class EngineActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        permissionManager.requestAllIfNeeded()
 
         engineViewRoot = RendererFactory.create(this)
         engineHost = engineViewRoot as EngineHostView
@@ -175,8 +176,6 @@ class EngineActivity : AppCompatActivity() {
             context = this,
             sitePermissions = sitePermissions,
             globalSettings = globalSettings,
-            historyStore = historyStore,
-            bookmarkStore = bookmarkStore,
             currentDomainProvider = { sitePermissions.domainOf(currentPageUrl) },
             onGlobalSettingsChanged = {
                 if (globalSettings.userKeepScreenOn) {
@@ -187,7 +186,6 @@ class EngineActivity : AppCompatActivity() {
             },
             onNavigateRequested = { url -> navigateForegroundTo(url) },
             currentUrlProvider = { currentPageUrl },
-            currentTitleProvider = { tabManager.foregroundSession()?.title ?: currentPageUrl },
             tabBarView = tabBarView,
         ).apply {
             onBackRequested = { goBack() }
@@ -393,16 +391,6 @@ class EngineActivity : AppCompatActivity() {
         engineHost.attach(session.layoutEngine)
         engineHost.onHtmxTrigger = session.onHtmxTrigger
         currentPageUrl = session.url
-        recordHistoryVisit(session.url, session.title)
-    }
-
-    /**
-     * 履歴への記録。SQLite書き込みはメインスレッドから外す。
-     * シークレットタブ運用を入れる場合はここでtabManager側のフラグを見て早期returnすればよい(TODO)。
-     */
-    private fun recordHistoryVisit(url: String, title: String) {
-        if (url.isBlank()) return
-        CoroutineScope(Dispatchers.IO).launch { historyStore.recordVisit(url, title) }
     }
 
     private fun buildShortcutApi(): ShortcutApi = ShortcutApi(
@@ -410,8 +398,8 @@ class EngineActivity : AppCompatActivity() {
         domContextProvider = { tabManager.foregroundSession()?.jsDomContext ?: error("No foreground tab") },
         registryProvider = { tabManager.foregroundSession()?.jsEngine?.registry ?: error("No foreground tab") },
         onNavigate = { navUrl -> runOnUiThread { navigateForegroundTo(navUrl) } },
-        onBookmark = { title, url ->
-            CoroutineScope(Dispatchers.IO).launch { bookmarkStore.add(url, title) }
+        onBookmark = { _, _ ->
+            // TODO: ブックマークストアは未実装。実装され次第ここから呼ぶ。
         },
         currentUrlProvider = { tabManager.foregroundSession()?.layoutEngine?.currentPath ?: "" },
     )
@@ -467,6 +455,11 @@ class EngineActivity : AppCompatActivity() {
                 viewportHeight = displayMetrics.heightPixels.toFloat(),
             )
             layoutEngine.currentPath = url
+            // LayoutEngineは生成しただけでは座標を計算しない(scheduleLayoutPass/runLayoutPassを
+            // 呼んで初めてcomputedRectが埋まる)。ここを呼び忘れると全要素がLayoutRect(0,0,0,0)の
+            // ままになり、GPU/Canvasどちらの描画パスでも「サイズ0の矩形」しか描かれず、
+            // 画面が白い(あるいは背景色のまま)になる(2026-07白画面調査で発覚)。
+            layoutEngine.runLayoutPass()
 
             val htmxEngine = HtmxRenderEngine(okHttpClient, htmlParser, layoutEngine)
 
@@ -511,9 +504,7 @@ class EngineActivity : AppCompatActivity() {
                 htmxEngine = htmxEngine,
                 jsDomContext = jsDomContext,
                 onHtmxTrigger = sharedHtmxTrigger,
-            ).apply {
-                pageTitle = runCatching { htmlParser.extractTitle(html) }.getOrNull()
-            }
+            )
         }
     }
 
