@@ -33,6 +33,7 @@ class JsEngine(
     private var es6Enabled = false
     private var htmxObject: Scriptable? = null
     private val seqOptimizer = HtmxSeqOptimizer()
+    private val hxOnScanner = HxOnAttributeScanner(registry)
 
     init {
         val ctx = Context.enter()
@@ -55,6 +56,7 @@ class JsEngine(
             ScriptableObject.putProperty(scope, "localStorage", Context.javaToJS(window.localStorage, scope))
             ScriptableObject.putProperty(scope, "sessionStorage", Context.javaToJS(window.sessionStorage, scope))
             ScriptableObject.putProperty(scope, "__seqOptimizer", Context.javaToJS(seqOptimizer, scope))
+            ScriptableObject.putProperty(scope, "__hxOnScanner", Context.javaToJS(hxOnScanner, scope))
             // 注意: setTimeout/setIntervalは window.setTimeout(...) の形でのみ呼び出し可能。
             // 素の setTimeout(...) (グローバル関数扱い)はサポートしていない。
             // Rhinoのオブジェクトラップはメソッドをそのまま関数として切り離せないため、
@@ -96,12 +98,42 @@ class JsEngine(
     /**
      * htmx.js(2.x系、XMLHttpRequestベース。fetch()ベースの4.x系は
      * このエンジンのXHRシムでは動かないので使わないこと)をロードする。
+     * ロード前にXPathEvaluatorの限定ポリフィルを注入し(htmx.jsがトップレベル評価時に
+     * `new XPathEvaluator`を使うため、htmxSource本体より先に評価する必要がある)、
      * ロード後、htmx:beforeSwap/afterSwapをdocument.bodyで購読し、
      * HtmxSeqOptimizerに繋ぐbootstrapスクリプトを自動で仕込む。
      *
      * @param htmxSource htmx.js(非圧縮/圧縮どちらでも可)のソース文字列
      */
     fun loadHtmx(htmxSource: String) {
+        // htmx.jsは `hx-on:`/`data-hx-on:`/`hx-on-`/`data-hx-on-` 属性を持つ子孫要素の
+        // 探索に(new XPathEvaluator).createExpression(...)を使う。このエンジンは
+        // 汎用XPathを実装していないため、この1パターン専用の限定ポリフィルで代替する
+        // (実体はHxOnAttributeScanner.kt、Kotlin側で子孫を辿って属性名プレフィックス
+        // 一致を見るだけ)。htmx側が他のXPath式を使うようになった場合はここを拡張すること。
+        evaluate(
+            """
+            function XPathEvaluator() {}
+            XPathEvaluator.prototype.createExpression = function(exprString) {
+                return {
+                    evaluate: function(contextNode) {
+                        var __results = __hxOnScanner.scan(contextNode);
+                        var __idx = 0;
+                        return {
+                            iterateNext: function() {
+                                if (__idx < __results.length) {
+                                    return __results[__idx++];
+                                }
+                                return null;
+                            }
+                        };
+                    }
+                };
+            };
+            """.trimIndent(),
+            sourceName = "xpath-evaluator-polyfill",
+        )
+
         evaluate(htmxSource, sourceName = "htmx.js")
 
         val ctx = Context.enter()

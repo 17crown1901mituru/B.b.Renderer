@@ -13,6 +13,8 @@ import androidx.drawerlayout.widget.DrawerLayout
 import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.core.FormControlElement
 import com.B.b.Renderer.core.HtmlFragmentParser
+import com.B.b.Renderer.data.BookmarkStore
+import com.B.b.Renderer.data.HistoryStore
 import com.B.b.Renderer.debug.BehaviorAuditLog
 import com.B.b.Renderer.debug.DebugDrawerView
 import com.B.b.Renderer.device.DeviceScriptEngine
@@ -28,6 +30,7 @@ import com.B.b.Renderer.permissions.RuntimePermissionManager
 import com.B.b.Renderer.permissions.SitePermissions
 import com.B.b.Renderer.network.SimpleCookieJar
 import com.B.b.Renderer.render.EngineHostView
+import com.B.b.Renderer.render.FindInPageController
 import com.B.b.Renderer.render.RendererFactory
 import com.B.b.Renderer.style.CssParser
 import com.B.b.Renderer.style.StyleResolver
@@ -67,6 +70,8 @@ class EngineActivity : AppCompatActivity() {
     private val globalSettings by lazy { GlobalAppSettings(this) }
     private val capabilityBridge by lazy { BrowserCapabilityBridge(this, sitePermissions, globalSettings) }
     private val thermalGuard by lazy { ThermalGuard(this) }
+    private val historyStore by lazy { HistoryStore(this) }
+    private val bookmarkStore by lazy { BookmarkStore(this) }
     // registerForActivityResult()はSTARTEDになる前に呼ぶ必要があるため、他のフィールドと違い
     // by lazyにはしない(初回参照タイミングが遅れて登録できなくなる可能性があるため)。
     private val permissionManager = RuntimePermissionManager(this)
@@ -176,6 +181,8 @@ class EngineActivity : AppCompatActivity() {
             context = this,
             sitePermissions = sitePermissions,
             globalSettings = globalSettings,
+            historyStore = historyStore,
+            bookmarkStore = bookmarkStore,
             currentDomainProvider = { sitePermissions.domainOf(currentPageUrl) },
             onGlobalSettingsChanged = {
                 if (globalSettings.userKeepScreenOn) {
@@ -186,6 +193,36 @@ class EngineActivity : AppCompatActivity() {
             },
             onNavigateRequested = { url -> navigateForegroundTo(url) },
             currentUrlProvider = { currentPageUrl },
+            currentTitleProvider = { tabManager.foregroundSession()?.title ?: currentPageUrl },
+            onFindInPage = { query -> findInPage?.search(query) },
+            onFindNext = { findInPage?.next() },
+            onFindPrevious = { findInPage?.previous() },
+            onFindClear = { findInPage?.clear() },
+            findStatusProvider = {
+                val controller = findInPage
+                if (controller == null || controller.query.isBlank()) {
+                    ""
+                } else if (controller.matchCount == 0) {
+                    "該当なし"
+                } else {
+                    "${controller.currentMatchNumber}/${controller.matchCount}件"
+                }
+            },
+            onZoomDelta = { delta ->
+                tabManager.foregroundSession()?.layoutEngine?.let { engine ->
+                    engine.setZoom(engine.zoomScale + delta)
+                    engineHost.requestLayoutPass()
+                }
+            },
+            onZoomReset = {
+                tabManager.foregroundSession()?.layoutEngine?.let { engine ->
+                    engine.resetZoom()
+                    engineHost.requestLayoutPass()
+                }
+            },
+            zoomPercentProvider = {
+                ((tabManager.foregroundSession()?.layoutEngine?.zoomScale ?: 1f) * 100).toInt()
+            },
             tabBarView = tabBarView,
         ).apply {
             onBackRequested = { goBack() }
@@ -279,6 +316,16 @@ class EngineActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         navigateForegroundTo(resolveInitialUrl(intent))
+    }
+
+    /** Geolocation等、OSのランタイム権限ダイアログの結果をBrowserCapabilityBridgeへ橋渡しする。 */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        capabilityBridge.onLocationPermissionResult(requestCode, grantResults)
     }
 
     private fun resolveInitialUrl(intent: Intent): String {
@@ -391,6 +438,23 @@ class EngineActivity : AppCompatActivity() {
         engineHost.attach(session.layoutEngine)
         engineHost.onHtmxTrigger = session.onHtmxTrigger
         currentPageUrl = session.url
+        recordHistoryVisit(session.url, session.title)
+        // タブ切替のたびに作り直す(実ブラウザ同様、ページ内検索の状態はタブをまたいで
+        // 引き継がない。旧コントローラのハイライトは古いroot/layoutEngineを参照した
+        // ままなので、明示的にclear()してから捨てる)。
+        findInPage?.clear()
+        findInPage = FindInPageController(session.root, session.layoutEngine) { engineHost.requestLayoutPass() }
+    }
+
+    private var findInPage: FindInPageController? = null
+
+    /**
+     * 履歴への記録。SQLite書き込みはメインスレッドから外す。
+     * シークレットタブ運用を入れる場合はここでtabManager側のフラグを見て早期returnすればよい(TODO)。
+     */
+    private fun recordHistoryVisit(url: String, title: String) {
+        if (url.isBlank()) return
+        CoroutineScope(Dispatchers.IO).launch { historyStore.recordVisit(url, title) }
     }
 
     private fun buildShortcutApi(): ShortcutApi = ShortcutApi(
@@ -398,8 +462,8 @@ class EngineActivity : AppCompatActivity() {
         domContextProvider = { tabManager.foregroundSession()?.jsDomContext ?: error("No foreground tab") },
         registryProvider = { tabManager.foregroundSession()?.jsEngine?.registry ?: error("No foreground tab") },
         onNavigate = { navUrl -> runOnUiThread { navigateForegroundTo(navUrl) } },
-        onBookmark = { _, _ ->
-            // TODO: ブックマークストアは未実装。実装され次第ここから呼ぶ。
+        onBookmark = { title, url ->
+            CoroutineScope(Dispatchers.IO).launch { bookmarkStore.add(url, title) }
         },
         currentUrlProvider = { tabManager.foregroundSession()?.layoutEngine?.currentPath ?: "" },
     )
@@ -458,7 +522,7 @@ class EngineActivity : AppCompatActivity() {
             // LayoutEngineは生成しただけでは座標を計算しない(scheduleLayoutPass/runLayoutPassを
             // 呼んで初めてcomputedRectが埋まる)。ここを呼び忘れると全要素がLayoutRect(0,0,0,0)の
             // ままになり、GPU/Canvasどちらの描画パスでも「サイズ0の矩形」しか描かれず、
-            // 画面が白い(あるいは背景色のまま)になる(2026-07白画面調査で発覚)。
+            // 画面が白い(あるいは背景色のまま)になる(2026-07白画面調査で発覚。別セッション由来の修正)。
             layoutEngine.runLayoutPass()
 
             val htmxEngine = HtmxRenderEngine(okHttpClient, htmlParser, layoutEngine)
@@ -491,6 +555,9 @@ class EngineActivity : AppCompatActivity() {
             val jsEngine = JsEngine(root, jsDomContext, okHttpClient, capabilityBridge)
             jsEngineRef = jsEngine
             jsEngine.window.location.href = url
+            jsEngine.window.onOpenPopup = { popupUrl ->
+                CoroutineScope(Dispatchers.Main).launch { openNewTab(popupUrl) }
+            }
             tryEnableEs6Support(jsEngine)
             tryLoadHtmxFromAssets(jsEngine)
 
@@ -504,7 +571,9 @@ class EngineActivity : AppCompatActivity() {
                 htmxEngine = htmxEngine,
                 jsDomContext = jsDomContext,
                 onHtmxTrigger = sharedHtmxTrigger,
-            )
+            ).apply {
+                pageTitle = runCatching { htmlParser.extractTitle(html) }.getOrNull()
+            }
         }
     }
 

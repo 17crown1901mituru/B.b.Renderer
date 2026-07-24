@@ -39,6 +39,40 @@ class JsWindow(private val capabilityBridge: BrowserCapabilityBridge? = null) {
     /** タブが生きている間だけのメモリ保持(ディスクには書かない)。 */
     val sessionStorage = JsStorage(InMemoryStorageBackend())
 
+    /**
+     * window.open()で実際に新しいタブを開く処理はEngine側(TabManager操作、UIスレッド限定)に
+     * 委譲する必要があるため、コールバックとして注入してもらう形にする(EngineActivity側で
+     * buildSession()時にセットする想定。未セットの間はopen()は許可判定にすら進まず何もしない)。
+     */
+    var onOpenPopup: ((String) -> Unit)? = null
+
+    /**
+     * window.open(url, target, features)相当。実仕様と異なりWindowオブジェクトは
+     * 返さない(このエンジンには複数タブそれぞれを指すJS側の参照を作る仕組みが無いため)。
+     * ポップアップブロックの既定はブロック側(SitePermissions.POPUPS、既定オフ)。
+     * ドメイン単位で許可すればJSから新規タブを開けるようになる。
+     */
+    fun open(url: String? = null, target: String? = null, features: String? = null): Any? {
+        if (url.isNullOrBlank()) return null
+        val absoluteUrl = resolveUrl(url)
+        val bridge = capabilityBridge
+        val domain = location.href.toHttpDomainOrEmpty()
+        val allowed = bridge?.isPopupAllowed(domain) ?: false
+        if (!allowed) {
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.JS_EVAL,
+                "popup blocked: $absoluteUrl (domain=$domain)",
+            )
+            return null
+        }
+        onOpenPopup?.invoke(absoluteUrl)
+        return null
+    }
+
+    /** location.hrefを基点に相対URLを解決する。解決できない場合は素通しする。 */
+    private fun resolveUrl(url: String): String =
+        runCatching { java.net.URI(location.href).resolve(url).toString() }.getOrDefault(url)
+
     fun setTimeout(callback: Function, delayMs: Double): Int {
         val id = nextId++
         val runnable = Runnable { invoke(callback) }

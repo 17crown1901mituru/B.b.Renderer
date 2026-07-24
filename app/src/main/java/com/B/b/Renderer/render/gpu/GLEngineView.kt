@@ -8,6 +8,7 @@ import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.input.RadioGroupController
 import com.B.b.Renderer.input.TouchInputController
 import com.B.b.Renderer.input.TouchPhase
+import com.B.b.Renderer.input.ZoomGestureHelper
 import com.B.b.Renderer.input.dispatchClick
 import com.B.b.Renderer.layout.LayoutEngine
 import com.B.b.Renderer.render.EngineHostView
@@ -17,6 +18,8 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
 
     private var glRenderer: GLEngineRenderer? = null
     private var touchController: TouchInputController? = null
+    private var layoutEngine: LayoutEngine? = null
+    private val zoomGesture = ZoomGestureHelper(context) { layoutEngine }
     override var onHtmxTrigger: ((Element) -> Unit)? = null
 
     init {
@@ -24,6 +27,7 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
     }
 
     override fun attach(engine: LayoutEngine) {
+        layoutEngine = engine
         val existingRenderer = glRenderer
         if (existingRenderer == null) {
             val renderer = GLEngineRenderer(context.applicationContext, engine)
@@ -66,6 +70,10 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (zoomGesture.onTouchEvent(event)) {
+            requestRender()
+            return true
+        }
         val controller = touchController ?: return super.onTouchEvent(event)
         val phase = when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> TouchPhase.DOWN
@@ -74,7 +82,8 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
             MotionEvent.ACTION_CANCEL -> TouchPhase.CANCEL
             else -> return super.onTouchEvent(event)
         }
-        controller.onTouchEvent(phase, event.x, event.y)
+        val zoom = layoutEngine?.zoomScale ?: 1f
+        controller.onTouchEvent(phase, event.x / zoom, event.y / zoom)
         requestRender()
         return true
     }

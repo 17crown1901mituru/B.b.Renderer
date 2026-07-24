@@ -65,16 +65,21 @@ class GLEngineRenderer(
 
     /**
      * 正射影の上下端をscrollY分だけシフトすることでスクロールを表現する
-     * (Canvas版のcanvas.translate(0, -scrollY)に相当)。毎フレーム呼ぶ必要があるため
-     * onSurfaceChangedからonDrawFrameへ移した(以前はリサイズ時にしか再計算されず、
-     * スクロール自体が反映されなかった)。
+     * (Canvas版のcanvas.translate(0, -scrollY)に相当)。zoomScaleは「見えている範囲の
+     * 広さ」を縮めることで表現する(zoom>1ほど可視範囲=effectiveWidth/Heightが狭くなり、
+     * 結果的に同じ図形が画面上で大きく映る。Canvas版のcanvas.scale(zoom,zoom)に相当)。
+     * 毎フレーム呼ぶ必要があるため(以前はリサイズ時にしか再計算されず、
+     * スクロール自体が反映されなかった)onSurfaceChangedからonDrawFrameへ移してある。
      */
     private fun updateProjection() {
         val scrollY = layoutEngine.scrollY
+        val zoom = layoutEngine.zoomScale.coerceAtLeast(0.01f)
+        val effectiveWidth = viewportWidth / zoom
+        val effectiveHeight = viewportHeight / zoom
         Matrix.orthoM(
             mvpMatrix, 0,
-            0f, viewportWidth.toFloat(),
-            viewportHeight.toFloat() + scrollY, scrollY,
+            0f, effectiveWidth,
+            scrollY + effectiveHeight, scrollY,
             -1f, 1f,
         )
     }

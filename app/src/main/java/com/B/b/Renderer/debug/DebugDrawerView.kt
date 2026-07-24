@@ -46,6 +46,14 @@ class DebugDrawerView(
     private val onNavigateRequested: ((String) -> Unit)? = null,
     private val currentUrlProvider: (() -> String)? = null,
     private val currentTitleProvider: (() -> String)? = null,
+    private val onFindInPage: ((String) -> Unit)? = null,
+    private val onFindNext: (() -> Unit)? = null,
+    private val onFindPrevious: (() -> Unit)? = null,
+    private val onFindClear: (() -> Unit)? = null,
+    private val findStatusProvider: (() -> String)? = null,
+    private val onZoomDelta: ((Float) -> Unit)? = null,
+    private val onZoomReset: (() -> Unit)? = null,
+    private val zoomPercentProvider: (() -> Int)? = null,
     val tabBarView: TabBarView? = null,
 ) : LinearLayout(context) {
 
@@ -76,6 +84,29 @@ class DebugDrawerView(
         orientation = VERTICAL
         setPadding(dp(12), dp(4), dp(12), dp(4))
         visibility = GONE
+    }
+
+    private val findQueryInput = EditText(context).apply {
+        hint = "ページ内検索"
+        setTextColor(Color.WHITE)
+        setHintTextColor(Color.GRAY)
+        textSize = 12f
+        isSingleLine = true
+        imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+        setBackgroundColor(Color.parseColor("#333333"))
+        setPadding(dp(8), dp(6), dp(8), dp(6))
+    }
+
+    private val findStatusText = TextView(context).apply {
+        setTextColor(Color.LTGRAY)
+        textSize = 11f
+        setPadding(dp(6), 0, dp(6), 0)
+    }
+
+    private val zoomPercentText = TextView(context).apply {
+        setTextColor(Color.LTGRAY)
+        textSize = 11f
+        setPadding(dp(6), 0, dp(6), 0)
     }
 
     private val logText = TextView(context).apply {
@@ -118,6 +149,8 @@ class DebugDrawerView(
         }
         content.addView(buildToolbar())
         content.addView(buildGlobalSettingsPanel())
+        content.addView(buildZoomPanel())
+        content.addView(buildFindInPagePanel())
         content.addView(buildRenderBenchmarkPanel())
         content.addView(buildHistoryHeader())
         content.addView(historyPanel)
@@ -199,6 +232,79 @@ class DebugDrawerView(
             },
         )
         return panel
+    }
+
+    /** ピンチ操作の補助・アクセシビリティ向けに、ボタンでもズームできるようにする。 */
+    private fun buildZoomPanel(): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+        }
+        row.addView(
+            TextView(context).apply {
+                text = "ズーム"
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+            },
+        )
+        row.addView(smallButton("－") { onZoomDelta?.invoke(-0.1f); refreshZoomStatus() })
+        row.addView(zoomPercentText)
+        row.addView(smallButton("＋") { onZoomDelta?.invoke(0.1f); refreshZoomStatus() })
+        row.addView(smallButton("リセット") { onZoomReset?.invoke(); refreshZoomStatus() })
+        refreshZoomStatus()
+        return row
+    }
+
+    private fun refreshZoomStatus() {
+        val percent = zoomPercentProvider?.invoke() ?: 100
+        zoomPercentText.text = "$percent%"
+    }
+
+    /** ページ内検索。要素単位のハイライト(FindInPageController)をこちらから叩くだけの薄いUI。 */
+    private fun buildFindInPagePanel(): LinearLayout {
+        val column = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+        }
+        column.addView(
+            TextView(context).apply {
+                text = "ページ内検索"
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+            },
+        )
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(findQueryInput, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        findQueryInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                onFindInPage?.invoke(findQueryInput.text.toString())
+                refreshFindStatus()
+                true
+            } else {
+                false
+            }
+        }
+        row.addView(smallButton("前へ") { onFindPrevious?.invoke(); refreshFindStatus() })
+        row.addView(smallButton("次へ") { onFindNext?.invoke(); refreshFindStatus() })
+        row.addView(
+            smallButton("×") {
+                findQueryInput.setText("")
+                onFindClear?.invoke()
+                refreshFindStatus()
+            },
+        )
+        column.addView(row)
+        column.addView(findStatusText)
+        refreshFindStatus()
+        return column
+    }
+
+    private fun refreshFindStatus() {
+        findStatusText.text = findStatusProvider?.invoke() ?: ""
     }
 
     /** GPUかCanvasかの起動時判定(RenderTierBenchmark)の状態表示・手動リセット */
@@ -541,6 +647,8 @@ class DebugDrawerView(
         refreshPermissions()
         refreshBenchmarkStatus()
         refreshBookmarkStar()
+        refreshZoomStatus()
+        refreshFindStatus()
         tabBarView?.refresh()
         if (!addressBarInput.isFocused) {
             currentUrlProvider?.invoke()?.let { addressBarInput.setText(it) }

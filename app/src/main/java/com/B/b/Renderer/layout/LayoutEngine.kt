@@ -38,6 +38,29 @@ class LayoutEngine(
         scrollY = scrollY.coerceIn(0f, maxScroll)
     }
 
+    /**
+     * ページズーム倍率(1.0が等倍)。ピンチ操作(ZoomGestureHelper)と、ドロワーの
+     * +/-/リセットボタン(EngineActivity側)の両方から更新される。
+     * レイアウト座標系そのものは変えず、描画時(canvas.scale/GLの正射影)と
+     * ヒットテスト時(タッチ座標をこの値で割ってから渡す)にだけ効かせる方式なので、
+     * ズーム変更でレイアウトのやり直し(scheduleLayoutPass)は不要。
+     */
+    var zoomScale: Float = 1.0f
+        private set
+
+    fun setZoom(scale: Float) {
+        zoomScale = scale.coerceIn(MIN_ZOOM, MAX_ZOOM)
+    }
+
+    fun resetZoom() {
+        zoomScale = 1.0f
+    }
+
+    companion object {
+        const val MIN_ZOOM = 0.5f
+        const val MAX_ZOOM = 3.0f
+    }
+
     /** Choreographer等、フレーム同期の仕組みを外部から注入する */
     fun setFrameScheduler(callback: (() -> Unit) -> Unit) {
         frameSchedulerImpl = callback

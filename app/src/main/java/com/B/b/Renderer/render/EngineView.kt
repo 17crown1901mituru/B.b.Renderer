@@ -9,6 +9,7 @@ import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.input.RadioGroupController
 import com.B.b.Renderer.input.TouchInputController
 import com.B.b.Renderer.input.TouchPhase
+import com.B.b.Renderer.input.ZoomGestureHelper
 import com.B.b.Renderer.input.dispatchClick
 import com.B.b.Renderer.layout.LayoutEngine
 
@@ -22,6 +23,7 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
     private val renderer = CanvasRenderer()
     private var layoutEngine: LayoutEngine? = null
     private var touchController: TouchInputController? = null
+    private val zoomGesture = ZoomGestureHelper(context) { layoutEngine }
     override var onHtmxTrigger: ((Element) -> Unit)? = null
 
     override fun attach(engine: LayoutEngine) {
@@ -59,12 +61,17 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
         super.onDraw(canvas)
         val engine = layoutEngine ?: return
         canvas.save()
+        canvas.scale(engine.zoomScale, engine.zoomScale)
         canvas.translate(0f, -engine.scrollY)
         renderer.render(canvas, engine.root)
         canvas.restore()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (zoomGesture.onTouchEvent(event)) {
+            postInvalidate()
+            return true
+        }
         val controller = touchController ?: return super.onTouchEvent(event)
         val phase = when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> TouchPhase.DOWN
@@ -73,7 +80,10 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
             MotionEvent.ACTION_CANCEL -> TouchPhase.CANCEL
             else -> return super.onTouchEvent(event)
         }
-        controller.onTouchEvent(phase, event.x, event.y)
+        // ズーム中はタッチ座標(screen space)をレイアウト座標(layout space)へ換算してから渡す。
+        // scrollYの加算(page space化)はTouchInputController側で行うため、ここではzoomの分だけ割る。
+        val zoom = layoutEngine?.zoomScale ?: 1f
+        controller.onTouchEvent(phase, event.x / zoom, event.y / zoom)
         postInvalidate()
         return true
     }

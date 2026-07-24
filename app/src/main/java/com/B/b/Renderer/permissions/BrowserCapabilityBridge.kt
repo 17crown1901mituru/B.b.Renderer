@@ -34,6 +34,13 @@ class BrowserCapabilityBridge(
     /** localStorage等、Context起点の処理(SharedPreferences等)から使う。Activity自体もContext。 */
     val context: android.content.Context get() = activity
 
+    /**
+     * window.open()相当のポップアップ許可チェック。既定は不許可(SitePermissions.POPUPS)。
+     * vibrate/wakeLock等と違いOSの権限は不要で、ドメイン単位の許可設定だけで完結する。
+     */
+    fun isPopupAllowed(domain: String): Boolean =
+        sitePermissions.isAllowed(domain, SitePermissions.Capability.POPUPS)
+
     fun vibrate(domain: String, patternMs: LongArray, fromUser: Boolean = false): Boolean {
         val allowed = if (fromUser) {
             globalSettings.userVibrationEnabled
