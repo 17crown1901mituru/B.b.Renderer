@@ -82,6 +82,10 @@ object RenderTierBenchmark {
             discarded = true
             sessionActive = false
             Log.i(TAG, "benchmark discarded: thermal status elevated mid-sample, will retry next launch")
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "benchmark discarded: thermal elevated mid-sample",
+            )
             return
         }
 
@@ -101,6 +105,10 @@ object RenderTierBenchmark {
         val avgMs = samples.map { it / 1_000_000.0 }.average()
         val sessionVerdict = if (avgMs > SLOW_FRAME_BUDGET_MS) Verdict.GPU_SLOW else Verdict.GPU_OK
         Log.i(TAG, "session result: avg=%.1fms verdict=%s (fingerprint=%s)".format(avgMs, sessionVerdict, Build.FINGERPRINT))
+        com.B.b.Renderer.debug.BehaviorAuditLog.record(
+            com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+            "benchmark session result: avg=%.1fms verdict=%s".format(avgMs, sessionVerdict),
+        )
         samples.clear()
         recordVote(context, sessionVerdict)
     }
@@ -118,11 +126,19 @@ object RenderTierBenchmark {
         if (totalVotes < REQUIRED_AGREEING_SESSIONS) {
             p.edit().putInt(okKey, okCount).putInt(slowKey, slowCount).apply()
             Log.i(TAG, "vote recorded ($totalVotes/$REQUIRED_AGREEING_SESSIONS): ok=$okCount slow=$slowCount, not final yet")
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "benchmark vote ($totalVotes/$REQUIRED_AGREEING_SESSIONS): ok=$okCount slow=$slowCount",
+            )
             return
         }
 
         val finalVerdict = if (slowCount > okCount) Verdict.GPU_SLOW else Verdict.GPU_OK
         Log.i(TAG, "verdict finalized after $totalVotes sessions: ok=$okCount slow=$slowCount -> $finalVerdict")
+        com.B.b.Renderer.debug.BehaviorAuditLog.record(
+            com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+            "benchmark verdict finalized: ok=$okCount slow=$slowCount -> $finalVerdict",
+        )
         p.edit()
             .putString(verdictKey(), finalVerdict.name)
             .remove(okKey)

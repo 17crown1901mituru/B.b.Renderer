@@ -21,6 +21,8 @@ class GLEngineRenderer(
 ) : GLSurfaceView.Renderer {
 
     private var benchmarkThisSession = false
+    private var firstFrameDiagLogged = false
+    private var emptyDrawsWarnLogged = false
 
     private val quadRenderer = QuadBatchRenderer()
     private val atlasQuadRenderer = AtlasQuadRenderer()
@@ -41,11 +43,18 @@ class GLEngineRenderer(
         atlasQuadRenderer.init()
         oesQuadRenderer.init()
 
+        com.B.b.Renderer.debug.BehaviorAuditLog.record(
+            com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+            "onSurfaceCreated fired",
+        )
+
         // 未判定の端末でのみ、この新しいGLコンテキストの最初の数十フレームを計測する。
         benchmarkThisSession = RenderTierBenchmark.shouldRunSession(appContext)
         if (benchmarkThisSession) {
             RenderTierBenchmark.beginSession()
         }
+        firstFrameDiagLogged = false
+        emptyDrawsWarnLogged = false
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -78,6 +87,18 @@ class GLEngineRenderer(
 
         val root = layoutEngine.root
         val paintOrder = resolvePaintOrder(root)
+
+        if (!firstFrameDiagLogged) {
+            firstFrameDiagLogged = true
+            val samples = paintOrder.take(3).joinToString(" / ") { el ->
+                "<${el.tag}> rect=${el.computedRect} bg=${el.computedStyle.backgroundColor}"
+            }
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "viewport=${viewportWidth}x$viewportHeight root.rect=${root.computedRect} " +
+                    "paintOrder.size=${paintOrder.size} samples=[$samples]",
+            )
+        }
 
         quadRenderer.beginFrame(maxQuads = paintOrder.size + 8)
         val textDraws = mutableListOf<Pair<Element, TextTextureCache.Entry>>()
@@ -137,6 +158,15 @@ class GLEngineRenderer(
         }
 
         quadRenderer.endFrameAndDraw(mvpMatrix)
+
+        if (!emptyDrawsWarnLogged && paintOrder.isNotEmpty() && textDraws.isEmpty() && videoDraws.isEmpty()) {
+            emptyDrawsWarnLogged = true
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "textDraws/videoDraws both empty despite paintOrder.size=${paintOrder.size} " +
+                    "(quadRendererのみ描画。テキストテクスチャ生成に失敗している可能性)",
+            )
+        }
 
         // ページ(通常1〜数枚)ごとにグルーピングし、ページにつき1 drawCallでまとめて描画する。
         // 以前は「テキスト要素数」だけdrawCallが出ていたが、これで「アトラスページ数」に減る。

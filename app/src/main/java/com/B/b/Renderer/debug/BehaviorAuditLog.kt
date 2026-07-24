@@ -28,6 +28,9 @@ object BehaviorAuditLog {
         DEVICE_SHORTCUT, // .rjsショートカット経由の操作(ShortcutApi)
         A11Y_ACTION,     // アクセシビリティサービス経由のアクティベーション
         HTMX_TRIGGER,    // hx-*要素のトリガー発火
+        RENDER_DIAG,     // 描画パイプライン(レイアウト・GPU)の診断ログ。ADBが使えない環境向けの
+                          // 一時的な調査用途(2026-07白画面調査分)。恒常的に垂れ流す想定ではないため、
+                          // 調査が終わったら呼び出し元を削るかコメントアウトすること。
     }
 
     data class Entry(
