@@ -1,4 +1,4 @@
-# B.b.Renderer
+# B.b.Renderer 
 
 Google WebViewに依存しない、独自DOM/CSS/レイアウト/HTMX連携エンジン。
 
