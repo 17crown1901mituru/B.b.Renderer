@@ -52,6 +52,8 @@ class JsEngine(
             // (このバグは過去に一度直した経緯があるが、別セッションの変更が本ファイルには
             // 反映されていなかった。2026-07再発分)。
             ScriptableObject.putProperty(scope, "location", Context.javaToJS(window.location, scope))
+            ScriptableObject.putProperty(scope, "localStorage", Context.javaToJS(window.localStorage, scope))
+            ScriptableObject.putProperty(scope, "sessionStorage", Context.javaToJS(window.sessionStorage, scope))
             ScriptableObject.putProperty(scope, "__seqOptimizer", Context.javaToJS(seqOptimizer, scope))
             // 注意: setTimeout/setIntervalは window.setTimeout(...) の形でのみ呼び出し可能。
             // 素の setTimeout(...) (グローバル関数扱い)はサポートしていない。

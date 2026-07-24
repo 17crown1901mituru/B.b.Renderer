@@ -26,6 +26,19 @@ class JsWindow(private val capabilityBridge: BrowserCapabilityBridge? = null) {
     val navigator = JsNavigator(capabilityBridge) { location.href }
     val screen = JsScreen(capabilityBridge) { location.href }
 
+    /**
+     * オリジン単位で永続化(SharedPreferences)。capabilityBridge(≒Context)が無い場合は
+     * NoopStorageBackendで安全にno-op化する。
+     */
+    val localStorage = JsStorage(
+        capabilityBridge?.let { bridge ->
+            SharedPrefsStorageBackend(bridge.context) { location.href.toOriginOrEmpty() }
+        } ?: NoopStorageBackend(),
+    )
+
+    /** タブが生きている間だけのメモリ保持(ディスクには書かない)。 */
+    val sessionStorage = JsStorage(InMemoryStorageBackend())
+
     fun setTimeout(callback: Function, delayMs: Double): Int {
         val id = nextId++
         val runnable = Runnable { invoke(callback) }
@@ -97,6 +110,8 @@ class JsNavigator(
     private val bridge: BrowserCapabilityBridge?,
     private val currentUrl: () -> String,
 ) {
+    val geolocation = JsGeolocation(bridge, currentUrl)
+
     fun vibrate(pattern: Any?): Boolean {
         val b = bridge ?: return false
         val domain = currentUrl().toHttpDomainOrEmpty()
@@ -141,3 +156,70 @@ class JsWakeLock(
 
 private fun String.toHttpDomainOrEmpty(): String =
     runCatching { java.net.URI(this).host ?: "" }.getOrDefault("")
+
+private fun String.toOriginOrEmpty(): String =
+    runCatching {
+        val uri = java.net.URI(this)
+        val host = uri.host ?: return ""
+        val scheme = uri.scheme ?: "https"
+        if (uri.port != -1) "$scheme://$host:${uri.port}" else "$scheme://$host"
+    }.getOrDefault("")
+
+/**
+ * navigator.geolocation相当。実APIの`getCurrentPosition(success, error, options)`に合わせ、
+ * successには`{coords: {latitude, longitude, accuracy}, timestamp}`形の簡易オブジェクトを渡す
+ * (実仕様のGeolocationPositionは他にもプロパティを持つが、頻出のもののみ実装)。
+ * errorには`{code, message}`を渡す(実仕様のPositionErrorに近い最小限の形)。
+ *
+ * サイト単位の許可(SitePermissions.GEOLOCATION)とOS権限(ACCESS_FINE/COARSE_LOCATION)の
+ * 両方が必要で、実処理はBrowserCapabilityBridge側にある。
+ */
+class JsGeolocation(
+    private val bridge: BrowserCapabilityBridge?,
+    private val currentUrl: () -> String,
+) {
+    fun getCurrentPosition(success: Function, error: Function? = null) {
+        val b = bridge
+        if (b == null) {
+            invokeError(error, "geolocation unavailable")
+            return
+        }
+        val domain = currentUrl().toHttpDomainOrEmpty()
+        b.getCurrentLocation(
+            domain,
+            onSuccess = { lat, lon, accuracy -> invokeSuccess(success, lat, lon, accuracy) },
+            onError = { message -> invokeError(error, message) },
+        )
+    }
+
+    private fun invokeSuccess(callback: Function, lat: Double, lon: Double, accuracy: Float) {
+        val ctx = Context.enter()
+        try {
+            val scope = ScriptableObject.getTopLevelScope(callback)
+            val coords = ctx.newObject(scope)
+            ScriptableObject.putProperty(coords, "latitude", lat)
+            ScriptableObject.putProperty(coords, "longitude", lon)
+            ScriptableObject.putProperty(coords, "accuracy", accuracy.toDouble())
+            val position = ctx.newObject(scope)
+            ScriptableObject.putProperty(position, "coords", coords)
+            ScriptableObject.putProperty(position, "timestamp", System.currentTimeMillis().toDouble())
+            callback.call(ctx, scope, scope, arrayOf(position))
+        } finally {
+            Context.exit()
+        }
+    }
+
+    private fun invokeError(callback: Function?, message: String) {
+        val cb = callback ?: return
+        val ctx = Context.enter()
+        try {
+            val scope = ScriptableObject.getTopLevelScope(cb)
+            val errorObject = ctx.newObject(scope)
+            ScriptableObject.putProperty(errorObject, "code", 1.0)
+            ScriptableObject.putProperty(errorObject, "message", message)
+            cb.call(ctx, scope, scope, arrayOf(errorObject))
+        } finally {
+            Context.exit()
+        }
+    }
+}

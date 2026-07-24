@@ -16,7 +16,7 @@ import java.net.URI
  */
 class SitePermissions(context: Context) {
 
-    enum class Capability { VIBRATE, WAKE_LOCK, ORIENTATION_LOCK, THIRD_PARTY_COOKIES }
+    enum class Capability { VIBRATE, WAKE_LOCK, ORIENTATION_LOCK, THIRD_PARTY_COOKIES, GEOLOCATION }
 
     private val prefs = context.getSharedPreferences("site_permissions", Context.MODE_PRIVATE)
 
