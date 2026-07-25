@@ -1,4 +1,3 @@
-
 package com.B.b.Renderer.js
 
 import com.B.b.Renderer.core.Element
@@ -122,6 +121,15 @@ class JsEngine(
      * 実害は防げるが、新しいページのDOMにhtmxを効かせるには別途
      * htmx.process()相当(onDomMutated経由)を呼ぶ必要がある。
      *
+     * 重要: ここで評価する3つのスクリプト(XPathポリフィル/htmx.js本体/glueコード)は
+     * すべてevaluateRaw()を使い、Babelトランスパイルを意図的にスキップする。
+     * Rhino 1.9.1はhtmx.jsが使うProxy/Reflect等のES6+構文をネイティブサポートする
+     * ためにわざわざ選定されたバージョンであり(ARCHITECTURE.md参照)、htmx.js自体を
+     * Babel経由でES5に変換し直す必要は無い。51KB超のminifiedコードをRhino
+     * インタプリタ上で動くBabel本体でフルAST変換すると非常に重く、実機で
+     * OutOfMemoryErrorを起こすことを2026-07に確認した(evaluate()経由で
+     * transpileしていたのが原因)。
+     *
      * @param htmxSource htmx.js(非圧縮/圧縮どちらでも可)のソース文字列
      */
     fun loadHtmx(htmxSource: String) {
@@ -135,7 +143,7 @@ class JsEngine(
         // 汎用XPathを実装していないため、この1パターン専用の限定ポリフィルで代替する
         // (実体はHxOnAttributeScanner.kt、Kotlin側で子孫を辿って属性名プレフィックス
         // 一致を見るだけ)。htmx側が他のXPath式を使うようになった場合はここを拡張すること。
-        evaluate(
+        evaluateRaw(
             """
             function XPathEvaluator() {}
             XPathEvaluator.prototype.createExpression = function(exprString) {
@@ -158,7 +166,7 @@ class JsEngine(
             sourceName = "xpath-evaluator-polyfill",
         )
 
-        evaluate(htmxSource, sourceName = "htmx.js")
+        evaluateRaw(htmxSource, sourceName = "htmx.js")
 
         val ctx = Context.enter()
         try {
@@ -175,7 +183,7 @@ class JsEngine(
 
         // beforeSwap/afterSwapをKotlin側のHtmxSeqOptimizerに橋渡しする最小限のglueコード。
         // document.bodyへのイベント委譲を使うことで、swap対象がどの要素であっても拾える。
-        evaluate(
+        evaluateRaw(
             """
             document.body.addEventListener('htmx:beforeSwap', function(evt) {
                 __seqOptimizer.captureBeforeSwap(evt.target);
@@ -219,8 +227,24 @@ class JsEngine(
         }
     }
 
-    /** 任意のJSコード文字列を実行する */
+    /**
+     * 任意のJSコード文字列を実行する。es6Enabled時はBabel経由でES5へ変換してから実行する
+     * (ページ側の<script>は任意のES6+構文を含みうるため)。
+     */
     fun evaluate(script: String, sourceName: String = "inline") {
+        evaluateInternal(script, sourceName, allowTranspile = true)
+    }
+
+    /**
+     * Babelトランスパイルを経由せず、常にRhinoへ生のまま渡す版。
+     * htmx.js本体、および本ファイル内で生成する小さなグルーコード用
+     * (詳細はloadHtmx()のコメント参照)。
+     */
+    private fun evaluateRaw(script: String, sourceName: String) {
+        evaluateInternal(script, sourceName, allowTranspile = false)
+    }
+
+    private fun evaluateInternal(script: String, sourceName: String, allowTranspile: Boolean) {
         com.B.b.Renderer.debug.BehaviorAuditLog.record(
             com.B.b.Renderer.debug.BehaviorAuditLog.Category.JS_EVAL,
             "eval start: $sourceName (${script.length} chars)",
@@ -228,7 +252,7 @@ class JsEngine(
         val ctx = Context.enter()
         try {
             ctx.optimizationLevel = -1
-            val actualScript = if (es6Enabled) {
+            val actualScript = if (allowTranspile && es6Enabled) {
                 try {
                     Es6RhinoRunner.transpileToES5(ctx, script)
                 } catch (e: Exception) {
