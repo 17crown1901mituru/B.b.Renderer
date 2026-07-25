@@ -29,6 +29,7 @@ import com.B.b.Renderer.permissions.GlobalAppSettings
 import com.B.b.Renderer.permissions.RuntimePermissionManager
 import com.B.b.Renderer.permissions.SitePermissions
 import com.B.b.Renderer.network.SimpleCookieJar
+import com.B.b.Renderer.render.AddressBarView
 import com.B.b.Renderer.render.EngineHostView
 import com.B.b.Renderer.render.FindInPageController
 import com.B.b.Renderer.render.RendererFactory
@@ -103,6 +104,7 @@ class EngineActivity : AppCompatActivity() {
     private lateinit var tabBarView: TabBarView
     private lateinit var pipContainer: LinearLayout
     private lateinit var loadingIndicator: View
+    private lateinit var addressBarView: AddressBarView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -137,8 +139,17 @@ class EngineActivity : AppCompatActivity() {
             setBackgroundColor(android.graphics.Color.parseColor("#2196F3"))
             visibility = View.GONE
         }
+        addressBarView = AddressBarView(this).apply {
+            onSubmit = { url -> navigateForegroundTo(url) }
+        }
         val mainContainer = FrameLayout(this).apply {
             addView(engineViewRoot, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(
+                addressBarView,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    gravity = Gravity.TOP
+                },
+            )
             addView(
                 pipContainer,
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -264,7 +275,9 @@ class EngineActivity : AppCompatActivity() {
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(loadingIndicator) { view, insets ->
             val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             val params = view.layoutParams as FrameLayout.LayoutParams
-            params.topMargin = bars.top
+            // アドレスバー(ステータスバー分のtop padding込みでおよそ48dp)の下に置く。
+            // 厳密にはaddressBarViewの実測高さを使うべきだが、固定値で実用上十分。
+            params.topMargin = bars.top + dp(48)
             view.layoutParams = params
             insets
         }
@@ -438,6 +451,7 @@ class EngineActivity : AppCompatActivity() {
         engineHost.attach(session.layoutEngine)
         engineHost.onHtmxTrigger = session.onHtmxTrigger
         currentPageUrl = session.url
+        addressBarView.setUrl(session.url)
         recordHistoryVisit(session.url, session.title)
         // タブ切替のたびに作り直す(実ブラウザ同様、ページ内検索の状態はタブをまたいで
         // 引き継がない。旧コントローラのハイライトは古いroot/layoutEngineを参照した
