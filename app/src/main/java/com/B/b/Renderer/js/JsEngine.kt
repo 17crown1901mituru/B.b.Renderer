@@ -167,7 +167,8 @@ class JsEngine(
             sourceName = "xpath-evaluator-polyfill",
         )
 
-        val sanitizedHtmxSource = sanitizeConstLetForRhino(htmxSource)
+        val patchedHtmxSource = patchEs2020SyntaxForRhino(htmxSource)
+        val sanitizedHtmxSource = sanitizeConstLetForRhino(patchedHtmxSource)
         evaluateRaw(sanitizedHtmxSource, sourceName = "htmx.js")
 
         val ctx = Context.enter()
@@ -198,6 +199,29 @@ class JsEngine(
         )
 
         htmxLoaded = true
+    }
+
+    /**
+     * htmx.js(2.0.10、vendored)がES2020構文(オプショナルチェイニング`?.`、
+     * Null合体演算子`??`)を2箇所使用しており、Rhino(1.9.1)がこれらの構文を
+     * パースできず"syntax error"になることを2026-07に確認した
+     * (const/letのvar置換だけでは解決せず、この問題が真因だった)。
+     *
+     * 汎用的なES2020→ES5トランスパイルは行わず、htmx.js 2.0.10で実際に
+     * 使われている2箇所をピンポイントで文字列置換するだけの限定パッチとする:
+     * - `p?.swapDelay` → `(p&&p.swapDelay)` (pはオブジェクトかnull/undefinedの
+     *   いずれかである前提のコードなので、`&&`による短絡評価で意味的に同等)
+     * - `s.push??"true"` → `(s.push!=null?s.push:"true")` (三項演算子による
+     *   Null合体演算子の展開)
+     *
+     * htmx.jsのバージョンを上げる場合、この2箇所の置換対象文字列が変わって
+     * いないか、また新たに`?.`/`??`を使う箇所が増えていないか再確認すること。
+     */
+    private fun patchEs2020SyntaxForRhino(source: String): String {
+        var result = source
+        result = result.replace("p?.swapDelay", "(p&&p.swapDelay)")
+        result = result.replace("s.push??\"true\"", "(s.push!=null?s.push:\"true\")")
+        return result
     }
 
     /**
