@@ -121,14 +121,15 @@ class JsEngine(
      * 実害は防げるが、新しいページのDOMにhtmxを効かせるには別途
      * htmx.process()相当(onDomMutated経由)を呼ぶ必要がある。
      *
-     * 重要: ここで評価する3つのスクリプト(XPathポリフィル/htmx.js本体/glueコード)は
-     * すべてevaluateRaw()を使い、Babelトランスパイルを意図的にスキップする。
-     * Rhino 1.9.1はhtmx.jsが使うProxy/Reflect等のES6+構文をネイティブサポートする
-     * ためにわざわざ選定されたバージョンであり(ARCHITECTURE.md参照)、htmx.js自体を
-     * Babel経由でES5に変換し直す必要は無い。51KB超のminifiedコードをRhino
-     * インタプリタ上で動くBabel本体でフルAST変換すると非常に重く、実機で
-     * OutOfMemoryErrorを起こすことを2026-07に確認した(evaluate()経由で
-     * transpileしていたのが原因)。
+     * 重要: htmx.js本体はsanitizeConstLetForRhino()を通してから評価する。
+     * Rhino(1.9.1)はlet/constのブロックスコープ実装が仕様通り完全ではなく、
+     * 別々の関数/ブロックスコープにある同名のconst宣言(minify後のhtmx.jsに
+     * 複数箇所ある短い変数名、例: i)を誤って「同一スコープでの再宣言」と
+     * 判定し"redeclaration of const ..."エラーを起こすことを2026-07に確認した
+     * (Babelを完全に無効化した状態でも再現したため、Babel起因ではなくRhino
+     * 自体の既知の制限と判断)。htmx.jsは信頼できる単一のライブラリソースなので、
+     * const/letをvarへ機械的に置換して回避する(任意サイトの未信頼スクリプトに
+     * 対してはこの変換を行わない)。
      *
      * @param htmxSource htmx.js(非圧縮/圧縮どちらでも可)のソース文字列
      */
@@ -166,7 +167,8 @@ class JsEngine(
             sourceName = "xpath-evaluator-polyfill",
         )
 
-        evaluateRaw(htmxSource, sourceName = "htmx.js")
+        val sanitizedHtmxSource = sanitizeConstLetForRhino(htmxSource)
+        evaluateRaw(sanitizedHtmxSource, sourceName = "htmx.js")
 
         val ctx = Context.enter()
         try {
@@ -197,6 +199,68 @@ class JsEngine(
 
         htmxLoaded = true
     }
+
+    /**
+     * Rhino(1.9.1)のlet/constブロックスコープ実装の既知の制限を回避するため、
+     * ソース中の"const"/"let"というトークンを"var"へ機械的に置換する。
+     * 文字列/テンプレートリテラル内の同じ綴りは誤って置換しないよう、
+     * 簡易的な状態機械でクォート内かどうかを1文字ずつ追跡する
+     * (正規表現の一括置換だと文字列内容を壊す恐れがあるため、あえて手書きにしている)。
+     *
+     * htmx.js専用の変換であり、ページ側の任意スクリプト(未信頼)には適用しない
+     * ―意味論上var化はスコープの意味が変わりうるが、htmx.js(minify済み・単一責務の
+     * ライブラリ)ではこれまでの実機検証で問題が確認されていない。
+     */
+    private fun sanitizeConstLetForRhino(source: String): String {
+        val sb = StringBuilder(source.length)
+        var i = 0
+        var quoteChar: Char? = null
+        while (i < source.length) {
+            val c = source[i]
+            if (quoteChar != null) {
+                sb.append(c)
+                if (c == '\\' && i + 1 < source.length) {
+                    // エスケープの次の1文字はクォート判定に使わずそのまま出力する
+                    sb.append(source[i + 1])
+                    i += 2
+                    continue
+                }
+                if (c == quoteChar) quoteChar = null
+                i++
+                continue
+            }
+            if (c == '\'' || c == '"' || c == '`') {
+                quoteChar = c
+                sb.append(c)
+                i++
+                continue
+            }
+            if (isWordAt(source, i, "const")) {
+                sb.append("var")
+                i += 5
+                continue
+            }
+            if (isWordAt(source, i, "let")) {
+                sb.append("var")
+                i += 3
+                continue
+            }
+            sb.append(c)
+            i++
+        }
+        return sb.toString()
+    }
+
+    private fun isWordAt(source: String, index: Int, word: String): Boolean {
+        if (!source.startsWith(word, index)) return false
+        val before = index - 1
+        if (before >= 0 && isIdentifierChar(source[before])) return false
+        val after = index + word.length
+        if (after < source.length && isIdentifierChar(source[after])) return false
+        return true
+    }
+
+    private fun isIdentifierChar(c: Char): Boolean = c.isLetterOrDigit() || c == '_' || c == '$'
 
     /** htmx.jsがロード済みなら`htmx.process(element)`を呼ぶ。未ロードなら何もしない。 */
     private fun notifyHtmxProcess(element: Element) {
