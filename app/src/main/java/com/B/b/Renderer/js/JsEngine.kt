@@ -167,7 +167,7 @@ class JsEngine(
             sourceName = "xpath-evaluator-polyfill",
         )
 
-        val patchedHtmxSource = patchEs2020SyntaxForRhino(htmxSource)
+        val patchedHtmxSource = patchSpreadSyntaxForRhino(patchEs2020SyntaxForRhino(htmxSource))
         val sanitizedHtmxSource = sanitizeConstLetForRhino(patchedHtmxSource)
         evaluateRaw(sanitizedHtmxSource, sourceName = "htmx.js")
 
@@ -221,6 +221,37 @@ class JsEngine(
         var result = source
         result = result.replace("p?.swapDelay", "(p&&p.swapDelay)")
         result = result.replace("s.push??\"true\"", "(s.push!=null?s.push:\"true\")")
+        return result
+    }
+
+    /**
+     * htmx.js(2.0.10、vendored)がES6のスプレッド構文(`...`)を3箇所使用しており、
+     * Rhino(1.9.1)がパースできず"syntax error"になることを2026-07に確認した
+     * (ES2020パッチ適用後もsyntax errorが続いたため、同じ手法で追加調査して発見)。
+     * htmx.js 2.0.10で実際に使われている3箇所をピンポイントで置換する:
+     * - `i.push(...F(...))` → `i.push.apply(i,F(...))` (関数呼び出し引数展開を
+     *   Function.prototype.applyへ書き換え、意味的に同等)
+     * - `r.push(...ve(i,n))` → 同上のパターン
+     * - `for(const t of[...e.children])` → `for(const t of Array.prototype.slice.call(e.children))`
+     *   (配列リテラル内でのイテラブル展開を、HTMLCollection相手のArray化に書き換え)
+     *
+     * htmx.jsのバージョンを上げる場合、この3箇所の置換対象文字列が変わっていないか、
+     * また新たにスプレッド構文を使う箇所が増えていないか再確認すること。
+     */
+    private fun patchSpreadSyntaxForRhino(source: String): String {
+        var result = source
+        result = result.replace(
+            "i.push(...F(u.querySelectorAll(e)))",
+            "i.push.apply(i,F(u.querySelectorAll(e)))",
+        )
+        result = result.replace(
+            "r.push(...ve(i,n))",
+            "r.push.apply(r,ve(i,n))",
+        )
+        result = result.replace(
+            "for(const t of[...e.children]){",
+            "for(const t of Array.prototype.slice.call(e.children)){",
+        )
         return result
     }
 
