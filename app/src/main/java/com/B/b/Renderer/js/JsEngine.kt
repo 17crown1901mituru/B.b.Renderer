@@ -202,62 +202,122 @@ class JsEngine(
 
     /**
      * Rhino(1.9.1)のlet/constブロックスコープ実装の既知の制限を回避するため、
-     * ソース中の"const"/"let"というトークンを"var"へ機械的に置換する。
-     * 文字列/テンプレートリテラル内の同じ綴りは誤って置換しないよう、
-     * 簡易的な状態機械でクォート内かどうかを1文字ずつ追跡する
-     * (正規表現の一括置換だと文字列内容を壊す恐れがあるため、あえて手書きにしている)。
+     * ソース中のトップレベルトークンとしての"const"/"let"を"var"へ機械的に
+     * 置換する簡易JSトークナイザ。以下を正しく識別してスキップ(置換対象外に)する:
      *
-     * htmx.js専用の変換であり、ページ側の任意スクリプト(未信頼)には適用しない
-     * ―意味論上var化はスコープの意味が変わりうるが、htmx.js(minify済み・単一責務の
-     * ライブラリ)ではこれまでの実機検証で問題が確認されていない。
+     * - 行コメント(//...)・ブロックコメント(/* ... *​/)
+     * - 文字列リテラル('...'/"..."/`...`、エスケープ考慮)
+     * - 正規表現リテラル(/.../ )。直前の意味のあるトークンから「除算演算子」か
+     *   「正規表現の開始」かを判定する(一般的なJSトークナイザの手法)。
+     *   この判定が無いと、正規表現内の引用符(例: /['"]/ のような文字クラス)を
+     *   文字列の開始と誤認し、以降のソース全体を読み違えて構文を破壊する
+     *   (2026-07、最初のconst/let置換実装で実際に発生した不具合)。
+     *
+     * htmx.js専用の変換であり、ページ側の任意スクリプト(未信頼)には適用しない。
      */
     private fun sanitizeConstLetForRhino(source: String): String {
         val sb = StringBuilder(source.length)
+        val n = source.length
         var i = 0
-        var quoteChar: Char? = null
-        while (i < source.length) {
-            val c = source[i]
-            if (quoteChar != null) {
-                sb.append(c)
-                if (c == '\\' && i + 1 < source.length) {
-                    // エスケープの次の1文字はクォート判定に使わずそのまま出力する
-                    sb.append(source[i + 1])
-                    i += 2
-                    continue
-                }
-                if (c == quoteChar) quoteChar = null
-                i++
-                continue
-            }
-            if (c == '\'' || c == '"' || c == '`') {
-                quoteChar = c
-                sb.append(c)
-                i++
-                continue
-            }
-            if (isWordAt(source, i, "const")) {
-                sb.append("var")
-                i += 5
-                continue
-            }
-            if (isWordAt(source, i, "let")) {
-                sb.append("var")
-                i += 3
-                continue
-            }
-            sb.append(c)
-            i++
-        }
-        return sb.toString()
-    }
+        // 直前の意味のあるトークンの直後に'/'が来た場合、正規表現の開始として
+        // 解釈してよいかどうか。false の場合は除算演算子とみなす。
+        var regexAllowed = true
+        val identBuffer = StringBuilder()
 
-    private fun isWordAt(source: String, index: Int, word: String): Boolean {
-        if (!source.startsWith(word, index)) return false
-        val before = index - 1
-        if (before >= 0 && isIdentifierChar(source[before])) return false
-        val after = index + word.length
-        if (after < source.length && isIdentifierChar(source[after])) return false
-        return true
+        fun flushIdent() {
+            if (identBuffer.isEmpty()) return
+            val word = identBuffer.toString()
+            when (word) {
+                "const", "let" -> sb.append("var")
+                else -> sb.append(word)
+            }
+            // 識別子/キーワードの直後は基本的に除算(division)の文脈だが、
+            // return/typeof/instanceof等のキーワードの後は式が続くため正規表現を許可する。
+            regexAllowed = word in REGEX_ALLOWED_AFTER_WORD
+            identBuffer.setLength(0)
+        }
+
+        while (i < n) {
+            val c = source[i]
+
+            if (isIdentifierChar(c)) {
+                identBuffer.append(c)
+                i++
+                continue
+            }
+            flushIdent()
+
+            when {
+                c == '/' && i + 1 < n && source[i + 1] == '/' -> {
+                    val end = source.indexOf('\n', i).let { if (it == -1) n else it }
+                    sb.append(source, i, end)
+                    i = end
+                    // コメントは透過的(regexAllowedは変更しない)
+                }
+                c == '/' && i + 1 < n && source[i + 1] == '*' -> {
+                    val closeIdx = source.indexOf("*/", i + 2)
+                    val end = if (closeIdx == -1) n else closeIdx + 2
+                    sb.append(source, i, end)
+                    i = end
+                }
+                c == '/' && regexAllowed -> {
+                    val start = i
+                    i++
+                    var inCharClass = false
+                    while (i < n) {
+                        val rc = source[i]
+                        if (rc == '\\' && i + 1 < n) {
+                            i += 2
+                            continue
+                        }
+                        if (rc == '\n') break // 未終端の異常系。安全側に打ち切る
+                        if (rc == '[') inCharClass = true
+                        if (rc == ']') inCharClass = false
+                        i++
+                        if (rc == '/' && !inCharClass) break
+                    }
+                    // 正規表現直後のフラグ(g/i/m/s/u/y等)も読み飛ばす
+                    while (i < n && source[i].isLetter()) i++
+                    sb.append(source, start, i)
+                    regexAllowed = false
+                }
+                c == '\'' || c == '"' || c == '`' -> {
+                    val quote = c
+                    val start = i
+                    i++
+                    while (i < n) {
+                        val sc = source[i]
+                        if (sc == '\\' && i + 1 < n) {
+                            i += 2
+                            continue
+                        }
+                        i++
+                        if (sc == quote) break
+                    }
+                    sb.append(source, start, i)
+                    regexAllowed = false
+                }
+                c.isWhitespace() -> {
+                    sb.append(c)
+                    i++
+                    // 空白はトークン境界に影響しない(regexAllowedは維持)
+                }
+                c == ')' || c == ']' -> {
+                    sb.append(c)
+                    regexAllowed = false
+                    i++
+                }
+                else -> {
+                    // その他の記号(演算子・カンマ・波括弧等)の後は式の開始として
+                    // 正規表現を許可しておく(過剰許可側に倒すが、除算誤判定より安全)。
+                    sb.append(c)
+                    regexAllowed = true
+                    i++
+                }
+            }
+        }
+        flushIdent()
+        return sb.toString()
     }
 
     private fun isIdentifierChar(c: Char): Boolean = c.isLetterOrDigit() || c == '_' || c == '$'
@@ -351,5 +411,14 @@ class JsEngine(
 
     fun dispose() {
         window.cancelAll()
+    }
+
+    companion object {
+        /** これらの単語の直後の'/'は正規表現の開始として扱う(除算ではない)。 */
+        private val REGEX_ALLOWED_AFTER_WORD = setOf(
+            "return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
+            "throw", "case", "do", "else", "yield", "await",
+            "const", "let", "var", "function", "if", "while", "for", "switch",
+        )
     }
 }
