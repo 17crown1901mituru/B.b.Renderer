@@ -5,11 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.widget.FrameLayout
-import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
-import androidx.drawerlayout.widget.DrawerLayout
 import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.core.FormControlElement
 import com.B.b.Renderer.core.HtmlFragmentParser
@@ -29,7 +25,7 @@ import com.B.b.Renderer.permissions.GlobalAppSettings
 import com.B.b.Renderer.permissions.RuntimePermissionManager
 import com.B.b.Renderer.permissions.SitePermissions
 import com.B.b.Renderer.network.SimpleCookieJar
-import com.B.b.Renderer.render.AddressBarView
+import com.B.b.Renderer.render.EngineFrameLayout
 import com.B.b.Renderer.render.EngineHostView
 import com.B.b.Renderer.render.FindInPageController
 import com.B.b.Renderer.render.RendererFactory
@@ -51,6 +47,10 @@ import okhttp3.Request
  * Google WebViewに依存しないエンジンのホストActivity。
  * 起動時に指定URLをfetchし、HTMLパース→スタイル解決→レイアウト計算→描画までを
  * 自前のパイプラインで行う。描画バックエンドはGPU端末性能に応じてRendererFactoryが選択する。
+ *
+ * 画面の組み立て(mainContainer/DrawerLayout/insets)自体はrender/EngineFrameLayout.ktに
+ * 委譲している(2026-07、Activity肥大化への対応として切り出し)。このActivityが持つのは
+ * 「どのURLを開くか」「どのタブに切り替えるか」といったナビゲーションロジックのみ。
  *
  * マルチタブ対応(2026-07議論分):
  *   - フォアグラウンド1タブ以外は既定で完全休止(TabManager)
@@ -99,12 +99,9 @@ class EngineActivity : AppCompatActivity() {
     private lateinit var engineViewRoot: View
     private lateinit var engineHost: EngineHostView
     private lateinit var deviceEngine: DeviceScriptEngine
-    private lateinit var debugDrawerLayout: DrawerLayout
+    private lateinit var engineFrame: EngineFrameLayout
     private lateinit var tabManager: TabManager
     private lateinit var tabBarView: TabBarView
-    private lateinit var pipContainer: LinearLayout
-    private lateinit var loadingIndicator: View
-    private lateinit var addressBarView: AddressBarView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,64 +118,10 @@ class EngineActivity : AppCompatActivity() {
         deviceEngine = DeviceScriptEngine(this, buildShortcutApi())
         deviceEngine.registerAll(RjsShortcutScanner.scan(assets))
 
-        pipContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
-        // ブラウザとしての機能(タブ一覧)・設定はドロワー側に集約し、ページ描画領域
-        // (engineViewRoot)は画面いっぱいに使う(2026-07議論分)。PiP小窓のみ上に重ねる。
-        val drawerToggleButton = android.widget.TextView(this).apply {
-            text = "☰"
-            textSize = 16f
-            setTextColor(android.graphics.Color.WHITE)
-            setBackgroundColor(android.graphics.Color.parseColor("#88000000"))
-            setPadding(dp(10), dp(6), dp(10), dp(6))
-            setOnClickListener { toggleDebugDrawer() }
-        }
-        loadingIndicator = View(this).apply {
-            setBackgroundColor(android.graphics.Color.parseColor("#2196F3"))
-            visibility = View.GONE
-        }
-        addressBarView = AddressBarView(this).apply {
-            onSubmit = { url -> navigateForegroundTo(url) }
-        }
-        val mainContainer = FrameLayout(this).apply {
-            addView(engineViewRoot, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            addView(
-                addressBarView,
-                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    gravity = Gravity.TOP
-                },
-            )
-            addView(
-                pipContainer,
-                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    gravity = Gravity.TOP or Gravity.END
-                },
-            )
-            addView(
-                loadingIndicator,
-                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)).apply {
-                    gravity = Gravity.TOP
-                },
-            )
-            addView(
-                drawerToggleButton,
-                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    gravity = Gravity.BOTTOM or Gravity.END
-                    setMargins(0, 0, dp(12), dp(12))
-                },
-            )
-        }
-
-        // EngineView(ページ描画)・ソフトウェアキーボード・デバッグ表示が同時に
-        // 画面上へ重なるとごちゃつくため、デバッグパネルは常時表示にせず
-        // DrawerLayoutのendドロワー(画面端からのスワイプ/ボタンで引き出す)に収める。
-        val drawerLayout = DrawerLayout(this)
-        drawerLayout.addView(
-            mainContainer,
-            DrawerLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
-        )
+        // 画面の組み立て(mainContainer/アドレスバー/PiP枠/ローディング表示/ドロワー枠/
+        // insets)は全てEngineFrameLayoutに委譲する。このActivityはエンジンViewを渡すだけ。
+        engineFrame = EngineFrameLayout(this, engineViewRoot)
+        engineFrame.addressBarView.onSubmit = { url -> navigateForegroundTo(url) }
 
         tabBarView = TabBarView(this, tabManager, onTabChanged = {}).apply {
             onTabSelected = { id -> switchToTab(id) }
@@ -241,46 +184,14 @@ class EngineActivity : AppCompatActivity() {
             onReloadRequested = { reloadCurrentTab() }
             onStopRequested = { stopLoading() }
         }
-        val drawerParams = DrawerLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        drawerParams.gravity = Gravity.END
-        drawerLayout.addView(debugDrawer, drawerParams)
-        drawerLayout.addDrawerListener(object : DrawerLayout.SimpleDrawerListener() {
-            override fun onDrawerOpened(drawerView: View) = debugDrawer.setAutoRefresh(true)
-            override fun onDrawerClosed(drawerView: View) = debugDrawer.setAutoRefresh(false)
-        })
-        this.debugDrawerLayout = drawerLayout
 
-        setContentView(drawerLayout)
+        engineFrame.attachEndDrawer(
+            drawerView = debugDrawer,
+            onOpened = { debugDrawer.setAutoRefresh(true) },
+            onClosed = { debugDrawer.setAutoRefresh(false) },
+        )
 
-        // targetSdk 35はedge-to-edgeが既定(システムバーの裏まで描画される)。
-        // 今まで一切insetsを処理していなかったため、ドロワーの上端がステータスバーに、
-        // 下端がナビゲーションバーに被って操作しづらくなっていた。ドロワー自体に
-        // システムバー分のパディングを入れる(コンテンツ側のengineViewRootは
-        // ページ自体をシステムバーの裏まで見せたい場合もあるため、あえて触らない)。
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(debugDrawer) { view, insets ->
-            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            view.setPadding(view.paddingLeft, bars.top, view.paddingRight, bars.bottom)
-            insets
-        }
-        // 右下トグルボタンもナビゲーションバーに埋もれないよう、下マージンをインセット分だけ足す
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(drawerToggleButton) { view, insets ->
-            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            val params = view.layoutParams as FrameLayout.LayoutParams
-            params.bottomMargin = dp(12) + bars.bottom
-            params.rightMargin = dp(12) + bars.right
-            view.layoutParams = params
-            insets
-        }
-
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(loadingIndicator) { view, insets ->
-            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            val params = view.layoutParams as FrameLayout.LayoutParams
-            // アドレスバー(ステータスバー分のtop padding込みでおよそ48dp)の下に置く。
-            // 厳密にはaddressBarViewの実測高さを使うべきだが、固定値で実用上十分。
-            params.topMargin = bars.top + dp(48)
-            view.layoutParams = params
-            insets
-        }
+        setContentView(engineFrame)
 
         // アプリ全体設定(ユーザー起因)は起動時点で即反映する(トグル操作を待たない)
         if (globalSettings.userKeepScreenOn) capabilityBridge.requestWakeLock("", fromUser = true)
@@ -302,8 +213,8 @@ class EngineActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
-                    ::debugDrawerLayout.isInitialized && debugDrawerLayout.isDrawerOpen(Gravity.END) ->
-                        debugDrawerLayout.closeDrawer(Gravity.END)
+                    ::engineFrame.isInitialized && engineFrame.isDrawerOpen(Gravity.END) ->
+                        engineFrame.closeDrawer(Gravity.END)
                     tabManager.canGoBack() -> goBack()
                     else -> {
                         isEnabled = false
@@ -316,12 +227,8 @@ class EngineActivity : AppCompatActivity() {
     }
 
     fun toggleDebugDrawer() {
-        if (::debugDrawerLayout.isInitialized) {
-            if (debugDrawerLayout.isDrawerOpen(Gravity.END)) {
-                debugDrawerLayout.closeDrawer(Gravity.END)
-            } else {
-                debugDrawerLayout.openDrawer(Gravity.END)
-            }
+        if (::engineFrame.isInitialized) {
+            engineFrame.toggleEndDrawer()
         }
     }
 
@@ -357,8 +264,8 @@ class EngineActivity : AppCompatActivity() {
     private var loadingJob: kotlinx.coroutines.Job? = null
 
     private fun setLoading(loading: Boolean) {
-        if (::loadingIndicator.isInitialized) {
-            loadingIndicator.visibility = if (loading) View.VISIBLE else View.GONE
+        if (::engineFrame.isInitialized) {
+            engineFrame.loadingIndicator.visibility = if (loading) View.VISIBLE else View.GONE
         }
     }
 
@@ -451,7 +358,7 @@ class EngineActivity : AppCompatActivity() {
         engineHost.attach(session.layoutEngine)
         engineHost.onHtmxTrigger = session.onHtmxTrigger
         currentPageUrl = session.url
-        addressBarView.setUrl(session.url)
+        engineFrame.addressBarView.setUrl(session.url)
         recordHistoryVisit(session.url, session.title)
         // タブ切替のたびに作り直す(実ブラウザ同様、ページ内検索の状態はタブをまたいで
         // 引き継がない。旧コントローラのハイライトは古いroot/layoutEngineを参照した
@@ -484,6 +391,7 @@ class EngineActivity : AppCompatActivity() {
 
     /** pinned+showAsPipなタブそれぞれに、小さなCPU/Canvas描画Viewを割り当てて表示する。 */
     private fun refreshPipOverlays() {
+        val pipContainer = engineFrame.pipContainer
         pipContainer.removeAllViews()
         val pxSize = (140 * resources.displayMetrics.density).toInt()
         tabManager.pipSessions().forEach { session ->
@@ -495,7 +403,7 @@ class EngineActivity : AppCompatActivity() {
             session.pipHostView = host
             pipContainer.addView(
                 pipView,
-                LinearLayout.LayoutParams(pxSize, (pxSize * 0.65f).toInt()).apply {
+                android.widget.LinearLayout.LayoutParams(pxSize, (pxSize * 0.65f).toInt()).apply {
                     setMargins(0, dp(4), dp(4), 0)
                 },
             )
