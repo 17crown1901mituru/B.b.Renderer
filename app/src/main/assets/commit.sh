@@ -1,11 +1,9 @@
 #!/bin/bash
 
-mkdir B.b.Renderer
+mkdir -p B.b.Renderer
 
 # 常に自分自身が置かれているディレクトリを基準に動くようにする
 cd "$(dirname "$(readlink -f "$0")")"
-
-#!/bin/bash
 
 SOURCE_DIR="/storage/emulated/0/Download/B.b.Renderer"
 REPO_DIR="/data/data/com.termux/files/home/B.b.Renderer"
@@ -27,10 +25,11 @@ rsync -a --delete --exclude='.git' "$SOURCE_DIR/" ./
 
 git add -A
 
+# 未コミットの変更があるかどうかを確認する
 if [ -n "$(git status --porcelain)" ]; then
     # プッシュ直前の時刻をUTCで取得
     START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    echo "Changes detected. Committing..."
+    echo "Changes detected (or uncommitted changes exist). Committing..."
     git commit -m "Sync: $(date '+%Y-%m-%d %H:%M:%S')" > /dev/null
     
     echo "Pushing to GitHub..."
@@ -53,27 +52,22 @@ if [ -n "$(git status --porcelain)" ]; then
     
     # --- 進捗率（%）とステップの表示 ---
     while true; do
-        # 【統合ポイント1】number（ビルド番号）も一緒に取得するように json オプションに追加
         RUN_DATA=$(gh run view "$RUN_ID" --json status,conclusion,number,jobs)
         STATUS=$(echo "$RUN_DATA" | jq -r '.status')
         CONCLUSION=$(echo "$RUN_DATA" | jq -r '.conclusion')
-        RUN_NUMBER=$(echo "$RUN_DATA" | jq -r '.number') # 変数に代入
+        RUN_NUMBER=$(echo "$RUN_DATA" | jq -r '.number')
         
-        # 全ステップ数と完了済みのステップ数をカウント
         TOTAL_STEPS=$(echo "$RUN_DATA" | jq '[.jobs[].steps[]] | length')
         DONE_STEPS=$(echo "$RUN_DATA" | jq '[.jobs[].steps[] | select(.status=="completed")] | length')
         
-        # 進捗率を計算
         if [ "$TOTAL_STEPS" -gt 0 ]; then
             PERCENT=$(( DONE_STEPS * 100 / TOTAL_STEPS ))
         else
             PERCENT=0
         fi
         
-        # 現在実行中のステップ名
         CURRENT=$(echo "$RUN_DATA" | jq -r '.jobs[0].steps[] | select(.status=="in_progress") | .name' | tail -n 1)
         
-        # 表示
         clear -x
         echo "--- Build Progress: $PERCENT% ---"
         echo "Status: $STATUS"
@@ -84,32 +78,23 @@ if [ -n "$(git status --porcelain)" ]; then
         sleep 8
     done
     
-    # 最終判定
     if [ "$CONCLUSION" = "success" ]; then
         echo -e "\n✅ Build Success!"
         
-        # --- 【統合ポイント2】成功したビルド番号のアーティファクトを自動ダウンロード ---
         echo "Downloading APK artifact..."
-        # build.ymlのアップロード名(bb-renderer-debug-<BUILD_DATE>)とここでのRUN_NUMBER基準の
-        # 名前がそもそも一致しない値だったため、名前を決め打ちで指定するのをやめ、
-        # このRunに実際に付いているアーティファクト(1Runにつき1個のみ)をそのまま取得する。
         mkdir -p "$APK_DOWNLOAD_DIR"
         gh run download "$RUN_ID" --dir "$APK_DOWNLOAD_DIR"
         DOWNLOAD_STATUS=$?
 
         APK_PATH=""
         if [ $DOWNLOAD_STATUS -eq 0 ]; then
-            # gh run downloadはAPK_DOWNLOAD_DIR/<アーティファクト名>/<ファイル>という構造で展開するため、
-            # ファイル名を決め打ちにせず、START_TIME以降に作られたapkを実体から探す。
             APK_PATH=$(find "$APK_DOWNLOAD_DIR" -name "*.apk" -newermt "$START_TIME" -printf '%T@ %p\n' 2>/dev/null \
                 | sort -n | tail -n 1 | cut -d' ' -f2-)
         fi
-        # ------------------------------------------------------------------
 
         if [ -n "$APK_PATH" ]; then
             echo "📦 APK successfully downloaded to: $APK_PATH"
         else
-            # 自動ダウンロードに失敗した場合のみ、手動で取得できるようArtifactsページを開く
             echo "⚠️ Failed to auto-download artifact via CLI."
             echo "Opening Artifacts page in browser..."
             RUN_URL=$(gh run view "$RUN_ID" --json url -q '.url')
@@ -120,7 +105,6 @@ if [ -n "$(git status --porcelain)" ]; then
                 echo "⚠️ Could not retrieve Run URL."
             fi
         fi
-        # --------------------------------------------------
         
     else
         echo -e "\n❌ Build Failed! [Fix targets below]\n"
@@ -128,7 +112,7 @@ if [ -n "$(git status --porcelain)" ]; then
         gh run view "$RUN_ID" --log-failed | grep "e: file" | sed 's|/.*/app/|app/|'
     fi
 else
-    echo "No changes detected. Nothing to do."
+    echo "No changes or uncommitted work detected. Nothing to do."
+    exit 0
 fi
-
 

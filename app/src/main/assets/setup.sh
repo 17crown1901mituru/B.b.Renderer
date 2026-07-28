@@ -186,18 +186,29 @@ REPO_DIR="/data/data/com.termux/files/home/B.b.Renderer"
 mkdir -p "$REPO_DIR"
 cd "$REPO_DIR" || exit 1
 
-# 2. Gitリポジトリの初期化
-git init
+# 2. Gitリポジトリの初期化（すでに存在する場合は初期化をスキップ）
+if [ ! -d ".git" ]; then
+    echo "Initializing Git repository..."
+    git init
+else
+    echo "✅ Git repository already initialized."
+fi
 
 # 3. メインブランチ名を 'main' に設定
 git branch -M main
 
-# 4. GitHubのリモートリポジトリを登録（提供されたURLを設定）
-git remote add origin "https://github.com/17crown1901mituru/B.b.Renderer.git"
+# 4. GitHubのリモートリポジトリを登録（すでに存在する場合はURLを更新するかエラーを回避）
+if git remote get-url origin >/dev/null 2>&1; then
+    echo "✅ Remote 'origin' already exists. Updating URL..."
+    git remote set-url origin "https://github.com/17crown1901mituru/B.b.Renderer.git"
+else
+    git remote add origin "https://github.com/17crown1901mituru/B.b.Renderer.git"
+fi
 
-echo "✅ リポジトリディレクトリの作成と初期設定が完了しました！"
+echo "✅ リポジトリディレクトリの確認と初期設定が完了しました！"
 echo "現在のディレクトリ: $(pwd)"
 git remote -v
+
 
 # ------------------------------------------------------------------------------
 # 9. 最終確認（失敗を握りつぶさず、はっきり表示する）

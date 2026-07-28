@@ -5,6 +5,14 @@ import com.B.b.Renderer.core.StackingContext
 
 class StyleResolver(private val stylesheet: Stylesheet) {
 
+    /**
+     * 実際にマッチング対象とするルール一覧。UserAgentStyles(タグ既定スタイル)を
+     * ページ側ルールより先(=詳細度が同じ場合に負ける側)に置いてマージする
+     * (2026-07、<h1>等のタグ既定フォントサイズが無く見出しと本文が同じ
+     * サイズで描画されていた問題への対応。詳細はUserAgentStyles.kt参照)。
+     */
+    private val effectiveRules: List<CssRule> = UserAgentStyles.rules + stylesheet.rules
+
     /** ツリー全体を上から辿り、継承を正しく伝播させる */
     fun resolveTree(root: Element, parentStyle: ComputedStyle = ComputedStyle()) {
         root.computedStyle = resolve(root, parentStyle)
@@ -16,7 +24,7 @@ class StyleResolver(private val stylesheet: Stylesheet) {
 
     /** 単一要素のみ再計算したい場合(DirtyLevel.STYLE用の軽量パス) */
     fun resolve(element: Element, parentStyle: ComputedStyle): ComputedStyle {
-        val matched = stylesheet.rules.filter { CssSelectorEngine.matches(element, it.selector) }
+        val matched = effectiveRules.filter { CssSelectorEngine.matches(element, it.selector) }
         val sorted = matched.sortedWith(compareBy<CssRule> { it.specificity }.thenBy { it.sourceOrder })
 
         var style = parentStyle.inheritableSubset()
