@@ -52,6 +52,14 @@ class StyleResolver(private val stylesheet: Stylesheet) {
         "pointer-events" -> style.copy(
             pointerEvents = if (decl.value == "none") PointerEvents.NONE else PointerEvents.AUTO,
         )
+        // marginはshorthand(1〜4値)と個別プロパティの両方に対応する。
+        // 2026-07、UserAgentStyles導入と合わせて追加(それまでmarginは常にZEROで、
+        // 見出し・本文・ページ端が隙間なくくっつく原因になっていた)。
+        "margin" -> style.copy(margin = parseBoxEdgesShorthand(decl.value, style.margin))
+        "margin-top" -> style.copy(margin = style.margin.copy(top = parsePxOrZero(decl.value)))
+        "margin-right" -> style.copy(margin = style.margin.copy(right = parsePxOrZero(decl.value)))
+        "margin-bottom" -> style.copy(margin = style.margin.copy(bottom = parsePxOrZero(decl.value)))
+        "margin-left" -> style.copy(margin = style.margin.copy(left = parsePxOrZero(decl.value)))
         else -> style
     }
 
@@ -81,6 +89,32 @@ class StyleResolver(private val stylesheet: Stylesheet) {
     }
 
     private fun parsePx(value: String): Float = value.removeSuffix("px").trim().toFloatOrNull() ?: 16f
+
+    /**
+     * margin用。font-sizeと違い未指定時のフォールバックは0が自然なため、
+     * parsePx()とは別に用意する(parsePx()は16fにフォールバックするため流用不可)。
+     * 現状はpx単位のみ対応。%やem/auto等のmargin値は今後拡張が必要。
+     */
+    private fun parsePxOrZero(value: String): Float = value.removeSuffix("px").trim().toFloatOrNull() ?: 0f
+
+    /**
+     * CSSのmargin shorthand(1〜4値)をBoxEdgesへ展開する。
+     *   1値: 全辺同じ
+     *   2値: 上下, 左右
+     *   3値: 上, 左右, 下
+     *   4値: 上, 右, 下, 左(時計回り)
+     * パース不能な値数の場合は変更前のBoxEdgesをそのまま返す(安全側)。
+     */
+    private fun parseBoxEdgesShorthand(value: String, current: BoxEdges): BoxEdges {
+        val parts = value.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.map { parsePxOrZero(it) }
+        return when (parts.size) {
+            1 -> BoxEdges(parts[0], parts[0], parts[0], parts[0])
+            2 -> BoxEdges(parts[0], parts[1], parts[0], parts[1])
+            3 -> BoxEdges(parts[0], parts[1], parts[2], parts[1])
+            4 -> BoxEdges(parts[0], parts[1], parts[2], parts[3])
+            else -> current
+        }
+    }
 
     private fun parseDisplay(value: String): Display = when (value.trim()) {
         "none" -> Display.NONE

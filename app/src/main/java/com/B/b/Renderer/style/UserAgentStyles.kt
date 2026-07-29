@@ -9,27 +9,40 @@ package com.B.b.Renderer.style
  * 全く同じ小さいサイズで描画され、実ブラウザと比べて視覚的な階層が
  * 失われていた(2026-07、白画面バグ解消後にスクショ比較で発覚)。
  *
- * 制約: StyleResolverが現状対応するCSSプロパティ(color/background-color/
- * font-size/display/position/width/height/z-index/pointer-events)の
- * 範囲内でのみ既定値を持たせている。font-weight(太字)やmargin(余白)は
- * StyleResolver/ComputedStyleが未対応のため、ここでは扱えない
- * (今後それらのプロパティ対応を追加する際、あわせてこのファイルにも
- * 既定値を足すこと。現状は見出しの「サイズ」だけが実ブラウザと揃う)。
+ * 2026-07追記: marginも同時に未実装だったため(StyleResolverがmarginプロパティを
+ * 一切解決していなかった)、見出し・本文・ページ端が隙間なくくっつき、
+ * 全体が画面左上に小さく固まって見える問題があった。StyleResolverにmargin対応を
+ * 追加したのと合わせて、ここにも既定marginを足す。値は実ブラウザの
+ * 既定em値(例: h1は0.67em)を、各タグのfont-size既定値で絶対px換算した近似値。
+ * ブラウザ実装によって多少の差はあるが、視覚的階層を再現する目的としては十分。
  *
- * 単位はpxのみで指定すること: CssParser経由で解決されるfont-sizeは
- * StyleResolver.parsePx()が"px"サフィックスの数値しか解釈せず、
- * em/rem/キーワード(large等)は未対応で16px(既定)にフォールバックして
- * しまうため、ここでは全て絶対px値(16pxを基準にした換算値)で指定する。
+ * 制約: StyleResolverが現状対応するCSSプロパティ(color/background-color/
+ * font-size/display/position/width/height/z-index/pointer-events/margin系)の
+ * 範囲内でのみ既定値を持たせている。font-weight(太字)はComputedStyleに
+ * フィールドはあるがStyleResolverが未対応のため、ここでは扱えない
+ * (今後対応を追加する際、あわせてこのファイルにも既定値を足すこと)。
+ *
+ * paddingはComputedStyle/LayoutEngine/GLEngineRendererが既に参照しているにも
+ *関わらず、StyleResolverがpaddingプロパティを一切解決していない(marginと
+ * 同種の未実装)。UAスタイルとしての既定paddingは無いため実害は目立ちにくいが、
+ * ページ側CSSでpadding指定しても反映されない状態は残っている(別途対応要)。
+ *
+ * 単位はpxのみで指定すること: CssParser経由で解決されるfont-size/marginは
+ * StyleResolverのparsePx()/parsePxOrZero()が"px"サフィックスの数値しか
+ * 解釈せず、em/rem/キーワードは未対応でフォールバック値になってしまうため、
+ * ここでは全て絶対px値(各タグのfont-size既定値を基準にした換算値)で指定する。
  */
 object UserAgentStyles {
     private const val DEFAULT_CSS = """
-        h1 { font-size: 32px; }
-        h2 { font-size: 24px; }
-        h3 { font-size: 19px; }
-        h4 { font-size: 16px; }
-        h5 { font-size: 13px; }
-        h6 { font-size: 11px; }
-        p, body, div { font-size: 16px; }
+        h1 { font-size: 32px; margin: 21px 0; }
+        h2 { font-size: 24px; margin: 20px 0; }
+        h3 { font-size: 19px; margin: 19px 0; }
+        h4 { font-size: 16px; margin: 21px 0; }
+        h5 { font-size: 13px; margin: 22px 0; }
+        h6 { font-size: 11px; margin: 25px 0; }
+        p { font-size: 16px; margin: 16px 0; }
+        body { font-size: 16px; margin: 8px; }
+        div { font-size: 16px; }
         small { font-size: 13px; }
         a { color: #0000EE; }
     """
