@@ -1,3 +1,4 @@
+
 package com.B.b.Renderer.style
 
 import com.B.b.Renderer.core.Element
@@ -27,23 +28,32 @@ class StyleResolver(private val stylesheet: Stylesheet) {
         val matched = effectiveRules.filter { CssSelectorEngine.matches(element, it.selector) }
         val sorted = matched.sortedWith(compareBy<CssRule> { it.specificity }.thenBy { it.sourceOrder })
 
+        // em/%指定のfont-sizeは「親の計算済みfontSize」を基準に変換する(CSS仕様通り、
+        // 要素自身が既に適用した別のfont-size宣言ではなく、常にparentStyleを基準にする。
+        // 2026-07、ページ側CSSが`h1{font-size:1.5em}`のようなem指定をしていた場合、
+        // 旧実装ではparsePx()が"px"サフィックスしか見ておらずtoFloatOrNull()に失敗、
+        // 無言で16pxにフォールバックしていた。UserAgentStylesの32px指定が
+        // ページ側の壊れたem解釈で上書きされ、見出しが常に16px相当になっていた
+        // 不具合の根本原因だったため対応)。
+        val parentFontSize = parentStyle.fontSize
+
         var style = parentStyle.inheritableSubset()
         sorted.forEach { rule ->
-            rule.declarations.forEach { decl -> style = applyDeclaration(style, decl) }
+            rule.declarations.forEach { decl -> style = applyDeclaration(style, decl, parentFontSize) }
         }
 
         // インラインstyle属性は詳細度最強として最後に適用
         element.attributes["style"]?.let { inlineCss ->
-            parseInlineDeclarations(inlineCss).forEach { decl -> style = applyDeclaration(style, decl) }
+            parseInlineDeclarations(inlineCss).forEach { decl -> style = applyDeclaration(style, decl, parentFontSize) }
         }
 
         return style
     }
 
-    private fun applyDeclaration(style: ComputedStyle, decl: CssDeclaration): ComputedStyle = when (decl.property) {
+    private fun applyDeclaration(style: ComputedStyle, decl: CssDeclaration, parentFontSize: Float): ComputedStyle = when (decl.property) {
         "color" -> style.copy(color = parseColor(decl.value))
         "background-color" -> style.copy(backgroundColor = parseColor(decl.value))
-        "font-size" -> style.copy(fontSize = parsePx(decl.value))
+        "font-size" -> style.copy(fontSize = parseFontSize(decl.value, parentFontSize, style.fontSize))
         "display" -> style.copy(display = parseDisplay(decl.value))
         "position" -> style.copy(position = parsePosition(decl.value))
         "width" -> style.copy(width = parseCssValue(decl.value))
@@ -52,9 +62,6 @@ class StyleResolver(private val stylesheet: Stylesheet) {
         "pointer-events" -> style.copy(
             pointerEvents = if (decl.value == "none") PointerEvents.NONE else PointerEvents.AUTO,
         )
-        // marginはshorthand(1〜4値)と個別プロパティの両方に対応する。
-        // 2026-07、UserAgentStyles導入と合わせて追加(それまでmarginは常にZEROで、
-        // 見出し・本文・ページ端が隙間なくくっつく原因になっていた)。
         "margin" -> style.copy(margin = parseBoxEdgesShorthand(decl.value, style.margin))
         "margin-top" -> style.copy(margin = style.margin.copy(top = parsePxOrZero(decl.value)))
         "margin-right" -> style.copy(margin = style.margin.copy(right = parsePxOrZero(decl.value)))
@@ -88,7 +95,26 @@ class StyleResolver(private val stylesheet: Stylesheet) {
         }
     }
 
-    private fun parsePx(value: String): Float = value.removeSuffix("px").trim().toFloatOrNull() ?: 16f
+    /**
+     * font-size専用パーサー。px/em/%に対応する。
+     *   px : 絶対値そのまま
+     *   em : parentFontSize(継承元の計算済みfontSize)を基準に乗算
+     *   %  : 同じくparentFontSizeを基準にした百分率
+     * 未対応の単位・パース不能な値は、UserAgentStylesの32px等が
+     * 無言で16pxに化けていた旧不具合(parsePx()の暗黙フォールバック)を
+     * 繰り返さないよう、「変更前のfontSizeを維持する」(=このdeclarationは無視する)
+     * という安全側の挙動にする。16fへの固定フォールバックは行わない。
+     */
+    private fun parseFontSize(value: String, parentFontSize: Float, currentFontSize: Float): Float {
+        val trimmed = value.trim()
+        return when {
+            trimmed.endsWith("px") -> trimmed.removeSuffix("px").toFloatOrNull() ?: currentFontSize
+            trimmed.endsWith("em") -> trimmed.removeSuffix("em").toFloatOrNull()?.let { it * parentFontSize } ?: currentFontSize
+            trimmed.endsWith("%") -> trimmed.removeSuffix("%").toFloatOrNull()?.let { it / 100f * parentFontSize } ?: currentFontSize
+            trimmed.endsWith("rem") -> trimmed.removeSuffix("rem").toFloatOrNull()?.let { it * 16f } ?: currentFontSize // ルート基準remは簡易実装では16px固定基準
+            else -> currentFontSize
+        }
+    }
 
     /**
      * margin用。font-sizeと違い未指定時のフォールバックは0が自然なため、
