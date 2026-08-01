@@ -27,16 +27,29 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
     }
 
     override fun attach(engine: LayoutEngine) {
+        // 2026-07、「起動直後、読み込みゲージが消えても描画されない」体感遅延の調査用。
+        // GLSurfaceViewはウィンドウが実際にフォーカスを得るまでサーフェスを生成しないため、
+        // 起動直後の権限ダイアログ等でウィンドウフォーカス確定が遅れると、attach()呼び出しから
+        // 実際の初回描画(onSurfaceCreated)までの間が長くなる可能性がある。ここで基準時刻を取り、
+        // GLEngineRenderer.onSurfaceCreated側で差分を計算してRENDER_DIAGへ記録する。
+        val attachStartNanos = System.nanoTime()
+        com.B.b.Renderer.debug.BehaviorAuditLog.record(
+            com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+            "GLEngineView.attach() called",
+        )
+
         layoutEngine = engine
         val existingRenderer = glRenderer
         if (existingRenderer == null) {
-            val renderer = GLEngineRenderer(context.applicationContext, engine)
+            val renderer = GLEngineRenderer(context.applicationContext, engine, attachStartNanos)
             glRenderer = renderer
             setRenderer(renderer)
             renderMode = RENDERMODE_WHEN_DIRTY
         } else {
             // setRenderer()はインスタンスにつき1回しか呼べない(2回目以降はIllegalStateException)。
             // rendererは使い回し、参照するLayoutEngineだけをGLスレッド上で差し替える。
+            // (2回目以降はGLコンテキストが既に生成済みでonSurfaceCreatedが再発火しないため、
+            // attach→onSurfaceCreated間の遅延計測は初回起動時のみ意味を持つ)
             queueEvent { existingRenderer.updateLayoutEngine(engine) }
         }
 

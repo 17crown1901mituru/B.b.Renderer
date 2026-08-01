@@ -18,11 +18,17 @@ import javax.microedition.khronos.opengles.GL10
 class GLEngineRenderer(
     private val appContext: Context,
     private var layoutEngine: LayoutEngine,
+    // 2026-07、起動直後の描画遅延調査用。GLEngineView.attach()呼び出し時点の
+    // System.nanoTime()を受け取り、onSurfaceCreated発火までの差分をRENDER_DIAGへ記録する。
+    // GLコンテキストは初回attach()時にしか作られない(setRendererは1回のみ)ため、
+    // この値は「最初のattach()呼び出し時刻」で固定でよい。
+    private val attachStartNanos: Long = System.nanoTime(),
 ) : GLSurfaceView.Renderer {
 
     private var benchmarkThisSession = false
     private var firstFrameDiagLogged = false
     private var emptyDrawsWarnLogged = false
+    private var surfaceCreatedDiagLogged = false
 
     private val quadRenderer = QuadBatchRenderer()
     private val atlasQuadRenderer = AtlasQuadRenderer()
@@ -43,10 +49,22 @@ class GLEngineRenderer(
         atlasQuadRenderer.init()
         oesQuadRenderer.init()
 
-        com.B.b.Renderer.debug.BehaviorAuditLog.record(
-            com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
-            "onSurfaceCreated fired",
-        )
+        // 初回のみ、attach()呼び出しからここまでの遅延を計測する。2回目以降のonSurfaceCreated
+        // (通常は発生しないが、GLコンテキストロスト等の異常系で再発火する可能性はある)では
+        // attachStartNanosが古い値のままで意味を持たないため、初回のみログに出す。
+        if (!surfaceCreatedDiagLogged) {
+            surfaceCreatedDiagLogged = true
+            val delayMs = (System.nanoTime() - attachStartNanos) / 1_000_000
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "onSurfaceCreated fired (attach→onSurfaceCreated delay=${delayMs}ms)",
+            )
+        } else {
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "onSurfaceCreated fired",
+            )
+        }
 
         // 未判定の端末でのみ、この新しいGLコンテキストの最初の数十フレームを計測する。
         benchmarkThisSession = RenderTierBenchmark.shouldRunSession(appContext)

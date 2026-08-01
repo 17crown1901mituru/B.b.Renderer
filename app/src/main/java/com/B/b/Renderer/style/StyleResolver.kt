@@ -67,6 +67,12 @@ class StyleResolver(private val stylesheet: Stylesheet) {
         "margin-right" -> style.copy(margin = style.margin.copy(right = parsePxOrZero(decl.value)))
         "margin-bottom" -> style.copy(margin = style.margin.copy(bottom = parsePxOrZero(decl.value)))
         "margin-left" -> style.copy(margin = style.margin.copy(left = parsePxOrZero(decl.value)))
+        // padding。marginと全く同じ解決パターン(BoxEdges shorthand展開・px単位のみ対応)を流用する。
+        "padding" -> style.copy(padding = parseBoxEdgesShorthand(decl.value, style.padding))
+        "padding-top" -> style.copy(padding = style.padding.copy(top = parsePxOrZero(decl.value)))
+        "padding-right" -> style.copy(padding = style.padding.copy(right = parsePxOrZero(decl.value)))
+        "padding-bottom" -> style.copy(padding = style.padding.copy(bottom = parsePxOrZero(decl.value)))
+        "padding-left" -> style.copy(padding = style.padding.copy(left = parsePxOrZero(decl.value)))
         else -> style
     }
 
@@ -117,14 +123,14 @@ class StyleResolver(private val stylesheet: Stylesheet) {
     }
 
     /**
-     * margin用。font-sizeと違い未指定時のフォールバックは0が自然なため、
+     * margin/padding共通。font-sizeと違い未指定時のフォールバックは0が自然なため、
      * parsePx()とは別に用意する(parsePx()は16fにフォールバックするため流用不可)。
-     * 現状はpx単位のみ対応。%やem/auto等のmargin値は今後拡張が必要。
+     * 現状はpx単位のみ対応。%やem/auto等の値は今後拡張が必要。
      */
     private fun parsePxOrZero(value: String): Float = value.removeSuffix("px").trim().toFloatOrNull() ?: 0f
 
     /**
-     * CSSのmargin shorthand(1〜4値)をBoxEdgesへ展開する。
+     * CSSのmargin/padding shorthand(1〜4値)をBoxEdgesへ展開する。
      *   1値: 全辺同じ
      *   2値: 上下, 左右
      *   3値: 上, 左右, 下
