@@ -101,6 +101,27 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
         return true
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // 2026-07、起動直後にonSurfaceCreatedが62秒近く発火せず、バックグラウンド→
+        // フォアグラウンド復帰でようやく描画される不具合の調査用。
+        // onAttachedToWindow/onWindowFocusChangedがonSurfaceCreatedよりどれだけ先行/
+        // 後続するかを見ることで、「ウィンドウ描画イベントが一度も起きていない」
+        // 仮説を検証する。
+        com.B.b.Renderer.debug.BehaviorAuditLog.record(
+            com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+            "GLEngineView.onAttachedToWindow() hasWindowFocus=$hasWindowFocus isShown=$isShown visibility=$visibility width=$width height=$height",
+        )
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        com.B.b.Renderer.debug.BehaviorAuditLog.record(
+            com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+            "GLEngineView.onWindowFocusChanged(hasFocus=$hasFocus) isShown=$isShown width=$width height=$height",
+        )
+    }
+
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         // queueEvent()自体がGLSurfaceView内部のGLThreadに触るため、setRenderer()が
