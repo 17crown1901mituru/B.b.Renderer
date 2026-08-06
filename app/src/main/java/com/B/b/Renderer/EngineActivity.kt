@@ -65,6 +65,12 @@ class EngineActivity : AppCompatActivity() {
         private const val PREFS_NAME = "engine_settings"
         private const val PREF_KEY_HOME_URL = "home_url"
         private const val DEFAULT_URL = "https://example.com/"
+
+        // 2026-07、起動時のオープニング画面用プレースホルダーHTML。
+        // ここに意味のある内容は無く、GLSurfaceViewのsetRenderer()/サーフェス生成を
+        // 実ページ読み込みより先に開始させるためだけの空ページ(下記attachOpeningScreen参照)。
+        private const val OPENING_SCREEN_HTML =
+            "<html><body style=\"background-color:#111111\"></body></html>"
     }
 
     private val sitePermissions by lazy { SitePermissions(this) }
@@ -192,6 +198,16 @@ class EngineActivity : AppCompatActivity() {
         )
 
         setContentView(engineFrame)
+
+        // 2026-07、GLSurfaceViewの初回サーフェス生成がウィンドウフォーカス遷移待ちで
+        // 15秒以上かかることがある不具合(RENDER_DIAGログで確認済み、詳細はGLEngineView.kt
+        // 側のnudgeSurfaceCreation()コメント参照)への対策。実ページの読み込み完了
+        // (fetch+パース+JS評価で数秒~十数秒かかる)を待ってからattach()するのではなく、
+        // 空のプレースホルダーで先にattach()し、GLSurfaceView側の重い登録処理を
+        // できるだけ早いタイミングで開始させる。実ページ読み込み完了時のattach()は
+        // 既存レンダラーがある2回目以降の経路(updateLayoutEngine)を通るだけなので、
+        // setRenderer()の「1インスタンス1回」制限には抵触しない。
+        attachOpeningScreen()
 
         // アプリ全体設定(ユーザー起因)は起動時点で即反映する(トグル操作を待たない)
         if (globalSettings.userKeepScreenOn) capabilityBridge.requestWakeLock("", fromUser = true)
@@ -411,6 +427,26 @@ class EngineActivity : AppCompatActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    /**
+     * オープニング画面(空のプレースホルダー)をengineHostへ先行attachする。
+     * 目的はGLSurfaceView側のサーフェス生成処理をできるだけ早く開始させることだけであり、
+     * このLayoutEngine自体はTabSessionにもtabManagerにも登録しない(実ページ読み込み完了時、
+     * applyForeground()が本物のLayoutEngineでengineHost.attach()を呼び直して置き換える)。
+     */
+    private fun attachOpeningScreen() {
+        val displayMetrics = resources.displayMetrics
+        val openingRoot = htmlParser.parseDocument(OPENING_SCREEN_HTML)
+        val openingStylesheet = CssParser().parse("")
+        StyleResolver(openingStylesheet).resolveTree(openingRoot)
+        val openingEngine = LayoutEngine(
+            root = openingRoot,
+            viewportWidth = displayMetrics.widthPixels.toFloat(),
+            viewportHeight = displayMetrics.heightPixels.toFloat(),
+        )
+        openingEngine.runLayoutPass()
+        engineHost.attach(openingEngine)
+    }
 
     /** URL取得・パース・スタイル解決・レイアウト・JS/HTMXエンジン一式を新規に組み立てる。タブ1つ分の構築。 */
     private suspend fun buildSession(url: String): TabSession {
