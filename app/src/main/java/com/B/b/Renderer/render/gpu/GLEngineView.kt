@@ -116,11 +116,11 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.record(
             com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
-            "GLEngineView.onWindowFocusChanged(hasFocus=$hasFocus) isShown=$isShown width=$width height=$height",
+            "GLEngineView.onAttachedToWindow() hasWindowFocus=${hasWindowFocus()} isShown=$isShown visibility=$visibility width=$width height=$height",
         )
-    }
+
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
