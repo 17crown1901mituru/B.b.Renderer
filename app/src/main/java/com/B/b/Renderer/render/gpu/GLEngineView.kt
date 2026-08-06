@@ -108,19 +108,20 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
         // onAttachedToWindow/onWindowFocusChangedがonSurfaceCreatedよりどれだけ先行/
         // 後続するかを見ることで、「ウィンドウ描画イベントが一度も起きていない」
         // 仮説を検証する。
+        val hasFocus = hasWindowFocus()
         com.B.b.Renderer.debug.BehaviorAuditLog.record(
             com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
-            "GLEngineView.onAttachedToWindow() hasWindowFocus=$hasWindowFocus isShown=$isShown visibility=$visibility width=$width height=$height",
+            "GLEngineView.onAttachedToWindow() hasWindowFocus=$hasFocus isShown=$isShown visibility=$visibility width=$width height=$height",
         )
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-                com.B.b.Renderer.debug.BehaviorAuditLog.record(
+        com.B.b.Renderer.debug.BehaviorAuditLog.record(
             com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
-            "GLEngineView.onAttachedToWindow() hasWindowFocus=${hasWindowFocus()} isShown=$isShown visibility=$visibility width=$width height=$height",
+            "GLEngineView.onWindowFocusChanged(hasFocus=$hasFocus) isShown=$isShown width=$width height=$height",
         )
-
+    }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
