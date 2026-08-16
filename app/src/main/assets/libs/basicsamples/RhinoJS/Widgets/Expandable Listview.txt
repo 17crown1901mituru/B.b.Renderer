@@ -1,0 +1,46 @@
+   var LinkedHashMap = Packages.java.util.LinkedHashMap;
+   var ArrayList = Packages.java.util.ArrayList;
+   var ExpandableListView = Packages.android.widget.ExpandableListView;
+   var LayoutParams = Packages.android.widget.LinearLayout.LayoutParams;
+   var Color = Packages.android.graphics.Color;
+   var View = Packages.android.view.View;
+   
+   var color = Color.parseColor("#237896");
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+   
+   var map =  new LinkedHashMap();
+   var array =  new ArrayList();
+   array.add("Item A 1");
+   array.add("Item A 2");
+   map.put("Title A",array);
+   var array2 =  new ArrayList();
+   array2.add("Item B 1");
+   array2.add("Item B 2");
+   map.put("Title B",array2);
+
+    function onCreate()
+   {
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      pkg.Utils.setNavigationBarBackgroundColor(ctx,color);
+      ctx.setTitle("Expandable Listview");
+      expview =  new ExpandableListView(ctx);
+      expview.setLayoutParams( new LayoutParams(LayoutParams.FILL_PARENT,LayoutParams.WRAP_CONTENT,0));
+     // expview.setBackgroundColor(Color.BLACK);
+      adpt = pkg.adapters.CustomExpandableListAdapter(ctx);
+      expview.setAdapter(adpt);
+      expview.setOnChildClickListener( function (parent,v,groupPosition,childPosition,id)
+      {
+         popup(adpt.getChild(groupPosition,childPosition));
+          return  true ;
+      });
+      expview.setOnItemLongClickListener( function (parent,v,position,id)
+      {
+         popup(v.getChildAt(0).getText().toString());
+          return  true ;
+      });
+      expview.setFastScrollEnabled( true );
+      ctx.setContentView(expview);
+      adpt.setList(map);
+   }
+   

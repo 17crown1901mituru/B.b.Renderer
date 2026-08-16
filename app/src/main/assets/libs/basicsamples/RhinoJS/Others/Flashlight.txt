@@ -1,0 +1,58 @@
+   var Color = Packages.android.graphics.Color;
+   var PaintDrawable = Packages.android.graphics.drawable.PaintDrawable;
+   var Gravity = Packages.android.view.Gravity;
+   var LinearLayout = Packages.android.widget.LinearLayout;
+   var Button = Packages.android.widget.Button;
+   var CameraManager = Packages.android.hardware.camera2.CameraManager;
+   var Context = Packages.android.content.Context;
+   var PackageManager = Packages.android.content.pm.PackageManager;
+   var lightOn =  false ;
+   var lay,btn;
+   var btnBgColor = Color.parseColor("#FF598FBA");
+    function onCreate()
+   {
+      ctx.setTitle("Flashlight");
+      pkg.Utils.setActionBarBackgroundColor(ctx,btnBgColor);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,btnBgColor);
+      pkg.Utils.setNavigationBarBackgroundColor(ctx,btnBgColor);
+      lay =  new LinearLayout(ctx);
+      lay.setGravity(Gravity.CENTER);
+      btn =  new Button(ctx);
+      btn.setText("Turn on");
+      pd =  new PaintDrawable(btnBgColor);
+      pd.setCornerRadius(100);
+       if (pkg.Utils.getApiLevel()>21)
+      {
+         rpl = pkg.Utils.getRippleDrawable(btnBgColor,Color.GRAY,900);
+         btn.setBackgroundDrawable(rpl);
+      }
+       else 
+      {
+         btn.setBackgroundDrawable(pd);
+      }
+      btn.setOnClickListener( function ()
+      {
+         openFlashlight(lightOn? false : true );
+         btn.setText(lightOn?"Turn off":"Turn on");
+      }
+      );
+      lay.addView(btn);
+      ctx.setContentView(lay);
+   }
+  
+    function openFlashlight(yes)
+   {
+      var cameraManager = ctx.getSystemService(Context.CAMERA_SERVICE);
+      try 
+      {
+         var cam_Id = cameraManager.getCameraIdList()[0];
+         cameraManager.setTorchMode(cam_Id,yes);
+         lightOn = yes;
+      }
+       catch (e)
+      {
+         popup(e);
+      }
+      
+   }
+   

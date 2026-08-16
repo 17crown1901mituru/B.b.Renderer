@@ -1,0 +1,16 @@
+var Color = Packages.android.graphics.Color;
+var BitmapFactory = Packages.android.graphics.BitmapFactory;
+var ActivityManager = Packages.android.app.ActivityManager;
+
+//Press recents key to view it
+
+
+var title = "Task";
+var taskBitmapIcon = BitmapFactory.decodeResource(ctx.getResources(),pkg.R.drawable.edit);
+var color = Color.RED;
+ if (android.os.Build.VERSION.SDK_INT>=21)
+   {
+      ctx.setTaskDescription( new ActivityManager.TaskDescription(title,taskBitmapIcon,color));
+      taskBitmapIcon.recycle();
+   }
+   

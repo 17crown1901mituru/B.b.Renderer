@@ -1,0 +1,48 @@
+    
+
+   function onPreCreate()
+   {
+      //lightTheme();
+      //darkTheme();
+      lightThemeDarkActionBar();
+      //materialTheme();
+   }
+    function onCreate()
+   {
+      
+   }
+    function lightTheme()
+   {
+      ctx.setTitle("Light Theme");
+      ctx.setTheme(android.R.style.Theme_DeviceDefault_Light);
+   }
+    function darkTheme()
+   {
+      ctx.setTitle("Dark Theme");
+      ctx.setTheme(android.R.style.Theme_DeviceDefault);
+   }
+    function lightThemeDarkActionBar()
+   {
+      ctx.setTitle("Light Theme Dark Action Bar");
+      ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+   }
+    function lightThemeNoActionBar()
+   {
+      ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_NoActionBar);
+   }
+    function holoLightTheme()
+   {
+      ctx.setTitle("Light Holo Theme");
+      ctx.setTheme(android.R.style.Theme_Holo_Light);
+   }
+    function holoDarkTheme()
+   {
+      ctx.setTitle("Dark Holo Theme");
+      ctx.setTheme(android.R.style.Theme_Holo);
+   }
+    function materialTheme()
+   {
+      ctx.setTitle("Material Theme");
+      ctx.setTheme(android.R.style.Theme_Material_Light);
+   }
+   

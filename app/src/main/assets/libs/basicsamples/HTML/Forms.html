@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+    <body>
+        <head>
+            <style>
+                form
+                {
+                    border:2px black solid;
+                    padding:15px;
+                }
+
+            </style>
+        </head>
+        <h4>Select</h4>
+        <form action="http://www.yourpage.com/action_page.php">
+            <select name="cars">
+            <option value="volvo">Volvo</option>
+            <option value="saab">Saab</option>
+            <option value="fiat" selected>Fiat</option>
+            <option value="audi">Audi</option>
+            </select>
+            <br><br>
+            <input type="submit"></input>
+        </form>
+        <h4>TextArea</h4>
+        <form action="http://www.yourpage.com/action_page.php">
+            <textarea name="message" rows="10" cols="30">The cat was playing in the garden.</textarea>
+            <br>
+            <input type="submit"></input>
+        </form>
+        <h4>DataList</h4>
+        <form action="http://www.yourpage.com/action_page.php">
+            <input list="browsers" name="browser">
+            <datalist id="browsers">
+                <option value="Internet Explorer"></option>
+                <option value="Firefox"></option>
+                <option value="Chrome"></option>
+                <option value="Opera"></option>
+                <option value="Safari"></option>
+            </datalist>
+            <input type="submit"></input>
+        </form>
+    </body>
+</html>

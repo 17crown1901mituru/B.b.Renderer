@@ -1,0 +1,21 @@
+var arr = [];
+var obj = {};
+var n = null;
+var nn = NaN;
+var num = 5;
+var bool = true;
+var reg = /s{2,3}/g;
+var str = "My String";
+var undef = undefined;
+var fun = function(){};
+
+console.log(typeof(arr));
+console.log(typeof(obj));
+console.log(typeof(n));
+console.log(typeof(nn));
+console.log(typeof(num));
+console.log(typeof(bool));
+console.log(typeof(reg));
+console.log(typeof(str));
+console.log(typeof(undef));
+console.log(typeof(fun));

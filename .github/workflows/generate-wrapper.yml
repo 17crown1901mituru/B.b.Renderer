@@ -1,0 +1,110 @@
+name: Generate Gradle Wrapper Jar
+
+# 手動実行専用。gradle-wrapper.jarはバイナリファイルのため、
+# ローカルにGradleが無い環境では生成できない。
+#
+# 【重要】以前は `gradle wrapper --gradle-version 8.7 --no-daemon` で
+# 生成し、artifactを手動ダウンロード→配置→コミットしていたが、
+# この方式は (1) `wrapper` タスクが既存jarを検証せず素通りする既知の
+# 仕様、(2) 手動コピーの過程でバイナリが1バイト欠落する事故、の
+# 2つの問題があった。
+#
+# 今回、生成方法だけを「gradle-wrapper.properties の distributionUrl が
+# 指す完全版distribution zip(実際にビルドで使えている、存在確実なURL)
+# から gradle-wrapper.jar を直接取り出す」方式に差し替え、コミットまで
+# ワークフロー自身が自動で行うようにした(手作業を排除)。
+#
+# 使い方:
+#   1. Actionsタブ → Generate Gradle Wrapper Jar → Run workflow
+#   2. 完了後、mainブランチに gradle-wrapper.jar の更新コミットが
+#      自動でpushされる。ローカルでのダウンロード・配置作業は不要。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Resolve distribution URL from gradle-wrapper.properties
+        id: resolve
+        run: |
+          set -e
+          DIST_URL=$(grep '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties \
+            | sed -e 's/^distributionUrl=//' -e 's/\\:/:/' -e 's/\r$//')
+          if [ -z "$DIST_URL" ]; then
+            echo "::error::gradle-wrapper.properties から distributionUrl を取得できませんでした。"
+            exit 1
+          fi
+          echo "url=$DIST_URL" >> "$GITHUB_OUTPUT"
+          echo "[*] Distribution URL: $DIST_URL"
+
+      - name: Download full Gradle distribution zip
+        env:
+          DIST_URL: ${{ steps.resolve.outputs.url }}
+        run: |
+          set -e
+          curl -fsSL -o /tmp/gradle-dist.zip "$DIST_URL"
+          echo "[*] Downloaded size: $(stat -c%s /tmp/gradle-dist.zip) bytes"
+
+      - name: Extract gradle-wrapper.jar from the distribution
+        run: |
+          set -e
+          cd /tmp
+          MATCH=$(unzip -Z1 gradle-dist.zip | grep -E 'lib/plugins/gradle-wrapper-.*\.jar$' | head -n1)
+          if [ -z "$MATCH" ]; then
+            echo "::error::distribution zip内に gradle-wrapper-*.jar が見つかりませんでした。"
+            unzip -Z1 gradle-dist.zip | grep -i wrapper || true
+            exit 1
+          fi
+          echo "[*] Found inside archive: $MATCH"
+          unzip -p gradle-dist.zip "$MATCH" > gradle-wrapper.jar
+
+      - name: Sanity-check the extracted jar
+        run: |
+          set -e
+          SIZE=$(stat -c%s /tmp/gradle-wrapper.jar)
+          echo "[*] Extracted size: ${SIZE} bytes"
+          if [ "$SIZE" -lt 10000 ]; then
+            echo "::error::抽出されたファイルが小さすぎます(${SIZE} bytes)。"
+            exit 1
+          fi
+          unzip -t /tmp/gradle-wrapper.jar >/dev/null
+          echo "[✓] zip構造として正常です。"
+
+      - name: Replace gradle-wrapper.jar
+        run: |
+          set -e
+          mkdir -p gradle/wrapper
+          cp /tmp/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.jar
+
+      - name: Commit and push if changed
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gradle/wrapper/gradle-wrapper.jar
+          if git diff --cached --quiet; then
+            echo "[*] gradle-wrapper.jar に変更はありませんでした。"
+          else
+            git commit -m "chore: regenerate gradle-wrapper.jar from official distribution zip"
+            git push
+            echo "[✓] gradle-wrapper.jar を更新してpushしました。"
+          fi

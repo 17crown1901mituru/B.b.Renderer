@@ -1,0 +1,5 @@
+
+
+const constant = 5;
+constant = 34;
+print(constant); // 5

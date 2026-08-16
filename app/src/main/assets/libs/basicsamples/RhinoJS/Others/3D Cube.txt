@@ -1,0 +1,223 @@
+   //Translated from java to javascript by Titus.
+   var View = Packages.android.view.View;
+   var WindowManager = Packages.android.view.WindowManager;
+   var Integer = Packages.java.lang.Integer;
+   var System = Packages.java.lang.System;
+   var RuntimeException = Packages.java.lang.RuntimeException;
+   var MotionEvent = Packages.android.view.MotionEvent;
+   var Thread = Packages.java.lang.Thread;
+   var EGL10 = javax.microedition.khronos.egl.EGL10;
+   var EGLConfig = javax.microedition.khronos.egl.EGLConfig;
+   var EGLDisplay = javax.microedition.khronos.egl.EGLDisplay;
+   var GL10 = javax.microedition.khronos.opengles.GL10;
+   var GLSurfaceView = android.opengl.GLSurfaceView;
+   var Camera = com.threed.jpct.Camera;
+   var FrameBuffer = com.threed.jpct.FrameBuffer;
+   var Light = com.threed.jpct.Light;
+   var Logger = com.threed.jpct.Logger;
+   var Object3D = com.threed.jpct.Object3D;
+   var Primitives = com.threed.jpct.Primitives;
+   var RGBColor = com.threed.jpct.RGBColor;
+   var SimpleVector = com.threed.jpct.SimpleVector;
+   var Texture = com.threed.jpct.Texture;
+   var TextureManager = com.threed.jpct.TextureManager;
+   var World = com.threed.jpct.World;
+   var BitmapHelper = com.threed.jpct.util.BitmapHelper;
+   var MemoryHelper = com.threed.jpct.util.MemoryHelper;
+   /**  * A simple demo. This shows more how to use jPCT-AE than it shows how to write  * a proper application for Android. It includes basic activity management to  * handle pause and resume...  *  * @author EgonOlsen  *  */
+   // Used to handle pause and resume...
+   var master =  null ;
+   var mGLView;
+   var renderer =  null ;
+   var fb =  null ;
+   var world =  null ;
+   var back =  new RGBColor(50,50,100);
+   var touchTurn = 0;
+   var touchTurnUp = 0;
+   var xpos = -1;
+   var ypos = -1;
+   var cube =  null ;
+   var fps = 0;
+   var sun =  null ;
+
+    function onCreate(savedInstanceState)
+   {
+      ctx.getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,WindowManager.LayoutParams.FLAG_FULLSCREEN);
+      ctx.getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_IMMERSIVE);
+      ctx.getActionBar().hide();
+      Logger.log("onCreate");
+       if (master !=  null )
+      {
+         copy(master);
+      }
+      mGLView =  new GLSurfaceView(ctx.getApplication());
+      mGLView.setEGLConfigChooser( function (egl,display)
+      {
+         // Ensure that we get a 16bit framebuffer. Otherwise, we'll fall
+         // back to Pixelflinger on some device (read: Samsung I7500)
+         var attributes = [EGL10.EGL_DEPTH_SIZE,16,EGL10.EGL_NONE];
+         var configs = java.lang.reflect.Array.newInstance(EGLConfig,1);
+         var result = java.lang.reflect.Array.newInstance(Integer.TYPE,1);
+         egl.eglChooseConfig(display,attributes,configs,1,result);
+          return configs[0];
+      });
+      var time = System.currentTimeMillis();
+      var renderer = 
+      {
+         onSurfaceChanged :  function (gl,w,h)
+         {
+             if (fb !=  null )
+            {
+               fb.dispose();
+            }
+            fb =  new FrameBuffer(gl,w,h);
+             if (master ==  null )
+            {
+               world =  new World();
+               world.setAmbientLight(20,20,20);
+               sun =  new Light(world);
+               sun.setIntensity(250,250,250);
+               // Create a texture out of the icon...:-)
+               var texture =  new Texture(BitmapHelper.rescale(BitmapHelper.convert(ctx.getResources().getDrawable(pkg.R.drawable.ic_launcher)),64,64));
+               TextureManager.getInstance().addTexture("texture",texture);
+               cube = Primitives.getCube(10);
+               cube.calcTextureWrapSpherical();
+               cube.setTexture("texture");
+               cube.strip();
+               cube.build();
+               world.addObject(cube);
+               var cam = world.getCamera();
+               cam.moveCamera(Camera.CAMERA_MOVEOUT,50);
+               cam.lookAt(cube.getTransformedCenter());
+               var sv =  new SimpleVector();
+               sv.set(cube.getTransformedCenter());
+               sv.y -= 100;
+               sv.z -= 100;
+               sun.setPosition(sv);
+               MemoryHelper.compact();
+                if (master ==  null )
+               {
+                  Logger.log("Saving master Activity!");
+                  master = ctx;
+               }
+               
+            }
+            
+         }
+         ,onSurfaceCreated :  function (gl,config)
+         {
+            
+         }
+         ,onDrawFrame :  function (gl)
+         {
+             if (touchTurn != 0)
+            {
+               cube.rotateY(touchTurn);
+               touchTurn = 0;
+            }
+             if (touchTurnUp != 0)
+            {
+               cube.rotateX(touchTurnUp);
+               touchTurnUp = 0;
+            }
+            
+            cube.rotateX(0.01);
+            cube.rotateY(-0.03)
+            
+            fb.clear(back);
+            world.renderScene(fb);
+            world.draw(fb);
+            fb.display();
+             if (System.currentTimeMillis() - time>=1000)
+            {
+               Logger.log(fps + "fps");
+               fps = 0;
+               time = System.currentTimeMillis();
+            }
+            fps++;
+         }
+         
+      };
+      mGLView.setRenderer(renderer);
+      ctx.setContentView(mGLView);
+   }
+
+    function onPause()
+   {
+      mGLView.onPause();
+   }
+
+    function onResume()
+   {
+      mGLView.onResume();
+   }
+
+    function onStop()
+   {
+      
+   }
+
+    function copy(src)
+   {
+      try 
+      {
+         Logger.log("Copying data from master Activity!");
+         var fs = src.getClass().getDeclaredFields();
+         for (var i = 0;i<fs.length;i++)
+         {
+            var f = fs[0];
+            f.setAccessible( true );
+            f.set( this ,f.get(src));
+         }
+         
+      }
+       catch (e)
+      {
+          throw  new RuntimeException(e);
+      }
+      
+   }
+
+    function onTouchEvent(me)
+   {
+       if (me.getAction() == MotionEvent.ACTION_DOWN)
+      {
+         xpos = me.getX();
+         ypos = me.getY();
+          return  true ;
+      }
+       if (me.getAction() == MotionEvent.ACTION_UP)
+      {
+         xpos = -1;
+         ypos = -1;
+         touchTurn = 0;
+         touchTurnUp = 0;
+          return  true ;
+      }
+       if (me.getAction() == MotionEvent.ACTION_MOVE)
+      {
+         var xd = me.getX() - xpos;
+         var yd = me.getY() - ypos;
+         xpos = me.getX();
+         ypos = me.getY();
+         touchTurn = xd / -100;
+         touchTurnUp = yd / -100;
+          return  true ;
+      }
+      try 
+      {
+         Thread.sleep(15);
+      }
+       catch (e)
+      {
+         // No need for this...
+         
+      }
+       return  false ;
+   }
+
+    function isFullscreenOpaque()
+   {
+       return  true ;
+   }
+   

@@ -1,0 +1,13 @@
+   var Intent = Packages.android.content.Intent;
+
+    function onCreate(bundle)
+   {
+      stopService();
+   }
+
+    function stopService()
+   {
+      var intent =  new Intent(ctx,pkg.ScriptService);
+      ctx.stopService(intent);
+   }
+   

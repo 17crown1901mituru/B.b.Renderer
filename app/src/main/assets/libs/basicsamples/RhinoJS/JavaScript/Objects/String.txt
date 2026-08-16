@@ -1,0 +1,5 @@
+var str = "JAS";
+var str2 = str+str;
+print(str2);
+print(str.slice(1,2));
+print(str.toLowerCase());

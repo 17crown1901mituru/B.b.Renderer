@@ -1,0 +1,28 @@
+   var Build = Packages.android.os.Build;
+   var TextView = Packages.android.widget.TextView;
+   var BatteryManager = Packages.android.os.BatteryManager;
+   let textview;
+
+    function onCreate(bundle)
+   {
+      ctx.setTitle("Device Info");
+      textview =  new TextView(ctx);
+      textview.setPadding(20,20,0,0);
+      ctx.setContentView(textview);
+      let str = "";
+      str += "Model: "+Build.MODEL+"\n";
+      str += "Brand: "+Build.BRAND+"\n";
+      str += "Version: "+Build.VERSION.RELEASE+"\n";
+      str += "Api Level: "+Build.VERSION.SDK+"\n";
+      str += "Manufacturer: "+Build.MANUFACTURER+"\n";
+      str += "Board: "+Build.BOARD+"\n";
+      str += "Cpu Abi: "+Build.CPU_ABI+"\n";
+      str += "Fingerprint: "+Build.FINGERPRINT+"\n";
+      str += "Hardware: "+Build.HARDWARE+"\n";
+      str += "Product: "+Build.PRODUCT+"\n";
+      str += "Radio: "+Build.RADIO+"\n";
+      str += "Bootloader: "+Build.BOOTLOADER+"\n";
+      str += "Id: "+Build.ID+"\n";
+      textview.setText(str);
+   }
+   

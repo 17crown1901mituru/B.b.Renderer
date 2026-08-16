@@ -1,0 +1,34 @@
+   var Gravity = Packages.android.view.Gravity;
+   var ColorStateList = Packages.android.content.res.ColorStateList;
+   var PaintDrawable = Packages.android.graphics.drawable.PaintDrawable;
+   var RippleDrawable = Packages.android.graphics.drawable.RippleDrawable;
+   var Button = Packages.android.widget.Button;
+   var LinearLayout = Packages.android.widget.LinearLayout;
+   var Color = Packages.android.graphics.Color;
+   var color = Color.parseColor("#648842");
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+
+    function onCreate()
+   {
+      ctx.setTitle("Paint Drawable");
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      var drawable = getDrawable(color);
+      lay =  new LinearLayout(ctx);
+      lay.setGravity(Gravity.CENTER);
+      btn =  new Button(ctx);
+      btn.setTextColor(Color.WHITE);
+      btn.setText("Button");
+      btn.setBackgroundDrawable(drawable);
+      lay.addView(btn);
+      ctx.setContentView(lay);
+   }
+
+    function getDrawable(backgroundColor)
+   {
+      var drawable;
+      drawable =  new PaintDrawable(backgroundColor);
+      drawable.setCornerRadius(10);
+       return drawable;
+   }
+   

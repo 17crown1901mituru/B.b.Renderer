@@ -1,0 +1,28 @@
+   // Use these icons in textviews, menu, listviews etc
+
+   var ScrollView = Packages.android.widget.ScrollView;
+   var Typeface = Packages.android.graphics.Typeface;
+   var Character = Packages.java.lang.Character;
+   var Integer = Packages.java.lang.Integer;
+   var EditText = Packages.android.widget.EditText;
+   var Gravity = Packages.android.view.Gravity;
+   var typeface = Typeface.createFromAsset(ctx.getResources().getAssets(),"fonts/icofont.ttf");
+   ctx.setTitle("Font icons");
+   var sc =  new ScrollView(ctx);
+   sc.setFillViewport( true );
+   var edt =  new EditText(ctx);
+   edt.setGravity(Gravity.TOP);
+   edt.setTextSize(30);
+   edt.setTypeface(typeface,0);
+
+   var start = 59649;
+   var s = String.fromCharCode(start);
+   var end = start+2150;
+   for (var i = start;i<end;i++)
+   {
+      s += String.fromCharCode(i)+" ";
+   }
+   edt.setText(s);
+   sc.addView(edt);
+   ctx.setContentView(sc);
+   

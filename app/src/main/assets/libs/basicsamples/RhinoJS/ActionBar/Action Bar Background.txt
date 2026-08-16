@@ -1,0 +1,31 @@
+   var MenuItem = Packages.android.view.MenuItem;
+   var ColorDrawable = Packages.android.graphics.drawable.ColorDrawable;
+   var Color = Packages.android.graphics.Color;
+   var ActionBar = Packages.android.app.ActionBar;
+   var actionBar;
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+    function onCreate()
+   {
+      setStatusBarBackgroundColor(Color.parseColor("#4465a5"));
+      actionBar = ctx.getActionBar();
+      actionBar.setTitle("ActionBar");
+      actionBar.setDisplayHomeAsUpEnabled( true );
+      actionBar.setBackgroundDrawable( new ColorDrawable(Color.parseColor("#6485c5")));
+      //Hide action bar
+      //actionBar.hide(); 
+      
+   }
+    function onCreateOptionsMenu(m)
+   {
+      m.clear();
+      m.add("Save").setIcon(android.R.drawable.ic_menu_save).setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
+      m.add("Exit");
+   }
+   
+   function onOptionsItemSelected(item){
+    if (item.getItemId() == android.R.id.home)
+      {
+         ctx.finish();
+      }
+   }
+   

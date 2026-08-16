@@ -1,0 +1,29 @@
+   // This is a service don't run it here;
+   // Start this service Using "Start Stop Service.txt" script
+   // NB standard functions such as popup, alert , setInterval bThread etc are not available though print is available
+   //Use broadcasts to communicate with the activity
+   var Toast = Packages.android.widget.Toast;
+
+    function onCreate(a,b,c)
+   {
+      print("onCreate");
+      showToast("Service created");
+   }
+
+    function onStartCommand(a,b,c)
+   {
+      print("onStartCommand");
+      showToast("onStart Command");
+   }
+
+    function onDestroy()
+   {
+      print("onDestroy");
+      showToast("Service destroyed");
+   }
+
+    function showToast(message)
+   {
+      Toast.makeText(ctx.getApplicationContext(),message,Toast.LENGTH_LONG).show();
+   }
+   

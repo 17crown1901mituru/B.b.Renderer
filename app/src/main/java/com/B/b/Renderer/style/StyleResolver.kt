@@ -1,0 +1,299 @@
+
+package com.B.b.Renderer.style
+
+import com.B.b.Renderer.core.Element
+import com.B.b.Renderer.core.StackingContext
+
+/**
+ * CSSの値解決を担う。2026-08、density対応を追加(下記density引数のコメント参照)。
+ */
+class StyleResolver(
+    private val stylesheet: Stylesheet,
+    // 2026-08対応。CSSのpx/em/rem等の長さは「デバイス非依存ピクセル」であり、
+    // 物理ピクセルに1:1で焼き込んでしまうと、density(画素密度)が高い端末ほど
+    // ページ本文が実際の1/density相当の大きさで描画されてしまう
+    // (ネイティブUI側はdensity基準pxで組んでいたため正しくスケールしていたが、
+    // ページ本文側だけCSSのpx値をそのまま物理pxとして扱っていたため、
+    // 「ネイティブUIだけ肥大化して見える」のではなく実際は「ページ本文だけ縮小されていた」
+    // というのがひかるから報告のあった見づらさの正体だった)。
+    // ここで受け取ったdensityを、CSSの長さをFloatへ変換する箇所(parseFontSize/
+    // parseLength/parseCssValue)でまとめて掛けることで、LayoutEngine以降は
+    // 今まで通り「物理px基準のワールド座標」として扱われる(GLの投影行列・タッチ入力・
+    // アクセシビリティ座標など、他の座標系には一切手を入れずに済む設計にしてある)。
+    private val density: Float = 1f,
+) {
+
+    companion object {
+        // rem(ルート要素基準)の基準値。このエンジンはルート要素のfont-sizeを可変にする
+        // 仕組みを持たないため、CSS仕様上の「html要素の計算済みfont-size」の代わりに
+        // 固定16pxを基準として扱う簡易実装(parseFontSize/parseLength双方で共有)。
+        private const val ROOT_FONT_SIZE_PX = 16f
+    }
+
+    /**
+     * 実際にマッチング対象とするルール一覧。UserAgentStyles(タグ既定スタイル)を
+     * ページ側ルールより先(=詳細度が同じ場合に負ける側)に置いてマージする
+     * (2026-07、<h1>等のタグ既定フォントサイズが無く見出しと本文が同じ
+     * サイズで描画されていた問題への対応。詳細はUserAgentStyles.kt参照)。
+     */
+    private val effectiveRules: List<CssRule> = UserAgentStyles.rules + stylesheet.rules
+
+    /** ツリー全体を上から辿り、継承を正しく伝播させる */
+    fun resolveTree(root: Element, parentStyle: ComputedStyle = ComputedStyle(fontSize = 16f * density)) {
+        root.computedStyle = resolve(root, parentStyle)
+        root.stackingContext = resolveStackingContext(root)
+        root.children.filterIsInstance<Element>().forEach {
+            resolveTree(it, root.computedStyle)
+        }
+    }
+
+    /** 単一要素のみ再計算したい場合(DirtyLevel.STYLE用の軽量パス) */
+    fun resolve(element: Element, parentStyle: ComputedStyle): ComputedStyle {
+        val matched = effectiveRules.filter { CssSelectorEngine.matches(element, it.selector) }
+        val sorted = matched.sortedWith(compareBy<CssRule> { it.specificity }.thenBy { it.sourceOrder })
+
+        // em/%指定のfont-sizeは「親の計算済みfontSize」を基準に変換する(CSS仕様通り、
+        // 要素自身が既に適用した別のfont-size宣言ではなく、常にparentStyleを基準にする。
+        // 2026-07、ページ側CSSが`h1{font-size:1.5em}`のようなem指定をしていた場合、
+        // 旧実装ではparsePx()が"px"サフィックスしか見ておらずtoFloatOrNull()に失敗、
+        // 無言で16pxにフォールバックしていた。UserAgentStylesの32px指定が
+        // ページ側の壊れたem解釈で上書きされ、見出しが常に16px相当になっていた
+        // 不具合の根本原因だったため対応)。
+        val parentFontSize = parentStyle.fontSize
+
+        var style = parentStyle.inheritableSubset()
+        sorted.forEach { rule ->
+            rule.declarations.forEach { decl -> style = applyDeclaration(style, decl, parentFontSize) }
+        }
+
+        // インラインstyle属性は詳細度最強として最後に適用
+        element.attributes["style"]?.let { inlineCss ->
+            parseInlineDeclarations(inlineCss).forEach { decl -> style = applyDeclaration(style, decl, parentFontSize) }
+        }
+
+        return style
+    }
+
+    private fun applyDeclaration(style: ComputedStyle, decl: CssDeclaration, parentFontSize: Float): ComputedStyle = when (decl.property) {
+        "color" -> style.copy(color = parseColor(decl.value))
+        "background-color" -> style.copy(backgroundColor = parseColor(decl.value))
+        "font-size" -> style.copy(fontSize = parseFontSize(decl.value, parentFontSize, style.fontSize))
+        "display" -> style.copy(display = parseDisplay(decl.value))
+        "position" -> style.copy(position = parsePosition(decl.value))
+        "width" -> style.copy(width = parseCssValue(decl.value))
+        "height" -> style.copy(height = parseCssValue(decl.value))
+        "z-index" -> style.copy(zIndex = decl.value.toIntOrNull())
+        "pointer-events" -> style.copy(
+            pointerEvents = if (decl.value == "none") PointerEvents.NONE else PointerEvents.AUTO,
+        )
+        "margin" -> {
+            val parsed = parseMarginShorthand(decl.value, style.margin, style.marginLeftAuto, style.marginRightAuto, style.fontSize)
+            style.copy(margin = parsed.edges, marginLeftAuto = parsed.leftAuto, marginRightAuto = parsed.rightAuto)
+        }
+        "margin-top" -> style.copy(margin = style.margin.copy(top = parseLength(decl.value, style.fontSize)))
+        "margin-right" -> {
+            val auto = decl.value.trim().equals("auto", ignoreCase = true)
+            style.copy(
+                margin = style.margin.copy(right = if (auto) 0f else parseLength(decl.value, style.fontSize)),
+                marginRightAuto = auto,
+            )
+        }
+        "margin-bottom" -> style.copy(margin = style.margin.copy(bottom = parseLength(decl.value, style.fontSize)))
+        "margin-left" -> {
+            val auto = decl.value.trim().equals("auto", ignoreCase = true)
+            style.copy(
+                margin = style.margin.copy(left = if (auto) 0f else parseLength(decl.value, style.fontSize)),
+                marginLeftAuto = auto,
+            )
+        }
+        // padding。marginと同じ長さパーサー(parseLength: px/em/rem対応)・shorthand展開
+        // パターンを流用する。
+        "padding" -> style.copy(padding = parseBoxEdgesShorthand(decl.value, style.padding, style.fontSize))
+        "padding-top" -> style.copy(padding = style.padding.copy(top = parseLength(decl.value, style.fontSize)))
+        "padding-right" -> style.copy(padding = style.padding.copy(right = parseLength(decl.value, style.fontSize)))
+        "padding-bottom" -> style.copy(padding = style.padding.copy(bottom = parseLength(decl.value, style.fontSize)))
+        "padding-left" -> style.copy(padding = style.padding.copy(left = parseLength(decl.value, style.fontSize)))
+        // text-align。ComputedStyle側には既にフィールドがあったが、ここでの解決が漏れていたため
+        // ページ側CSSでtext-align:center等を指定しても常にLEFT扱いになっていた(2026-08対応)。
+        "text-align" -> style.copy(textAlign = parseTextAlign(decl.value))
+        else -> style
+    }
+
+    private fun resolveStackingContext(element: Element): StackingContext? {
+        val style = element.computedStyle
+        val isolates = style.position in setOf(Position.ABSOLUTE, Position.FIXED, Position.STICKY)
+        return if (style.zIndex != null || isolates) {
+            StackingContext(zIndex = style.zIndex ?: 0, isolatesChildren = isolates)
+        } else {
+            null
+        }
+    }
+
+    private fun parseInlineDeclarations(css: String): List<CssDeclaration> =
+        css.split(";").mapNotNull { decl ->
+            val parts = decl.split(":", limit = 2)
+            if (parts.size != 2) return@mapNotNull null
+            CssDeclaration(parts[0].trim(), parts[1].trim(), false)
+        }
+
+    private fun parseColor(value: String): Color {
+        val hex = value.trim().removePrefix("#")
+        return when (hex.length) {
+            6 -> Color(hex.substring(0, 2).toInt(16), hex.substring(2, 4).toInt(16), hex.substring(4, 6).toInt(16))
+            else -> Color.BLACK // named color / rgb()は今後拡張
+        }
+    }
+
+    /**
+     * font-size専用パーサー。px/em/%/remに対応する。
+     *   px : 絶対値(density倍する。下記density対応参照)
+     *   em : parentFontSize(継承元の計算済みfontSize)を基準に乗算
+     *   %  : 同じくparentFontSizeを基準にした百分率
+     *   rem: ROOT_FONT_SIZE_PX(簡易実装では16px固定)を基準に乗算
+     * 未対応の単位・パース不能な値は、UserAgentStylesの32px等が
+     * 無言で16pxに化けていた旧不具合(parsePx()の暗黙フォールバック)を
+     * 繰り返さないよう、「変更前のfontSizeを維持する」(=このdeclarationは無視する)
+     * という安全側の挙動にする。16fへの固定フォールバックは行わない。
+     *
+     * density対応(2026-08): pxとremはCSS側の値をそのままdensity倍する。em/%は
+     * parentFontSizeに対する相対値で、parentFontSize自体が既にdensity済みなので
+     * 二重に掛けない(parseLengthのem branchと同じ考え方)。
+     */
+    private fun parseFontSize(value: String, parentFontSize: Float, currentFontSize: Float): Float {
+        val trimmed = value.trim()
+        return when {
+            trimmed.endsWith("px") -> trimmed.removeSuffix("px").toFloatOrNull()?.let { it * density } ?: currentFontSize
+            trimmed.endsWith("em") -> trimmed.removeSuffix("em").toFloatOrNull()?.let { it * parentFontSize } ?: currentFontSize
+            trimmed.endsWith("%") -> trimmed.removeSuffix("%").toFloatOrNull()?.let { it / 100f * parentFontSize } ?: currentFontSize
+            trimmed.endsWith("rem") -> trimmed.removeSuffix("rem").toFloatOrNull()?.let { it * ROOT_FONT_SIZE_PX * density } ?: currentFontSize // ルート基準remは簡易実装では16px固定基準
+            else -> currentFontSize
+        }
+    }
+
+    /**
+     * margin専用のshorthand展開。padding同様の1〜4値展開("上/上下+左右/上+左右+下/上右下左")に
+     * 加え、"auto"トークンをleft/right個別に検出する(margin:auto centering、2026-08対応)。
+     * top/bottomの"auto"はこのエンジンの(フレックスコンテキスト等を持たない)ブロックフロー
+     * 内では常に0として扱ってよい値のため、parseLength()の非数値→0フォールバックに
+     * 素直に乗せている(padding用のparseBoxEdgesShorthandと処理を分けたのはこのため)。
+     */
+    private data class ParsedMargin(val edges: BoxEdges, val leftAuto: Boolean, val rightAuto: Boolean)
+
+    private fun parseMarginShorthand(value: String, current: BoxEdges, currentLeftAuto: Boolean, currentRightAuto: Boolean, fontSize: Float): ParsedMargin {
+        val tokens = value.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.size !in 1..4) return ParsedMargin(current, currentLeftAuto, currentRightAuto)
+
+        val values = tokens.map { parseLength(it, fontSize) }
+        val edges = when (tokens.size) {
+            1 -> BoxEdges(values[0], values[0], values[0], values[0])
+            2 -> BoxEdges(values[0], values[1], values[0], values[1])
+            3 -> BoxEdges(values[0], values[1], values[2], values[1])
+            else -> BoxEdges(values[0], values[1], values[2], values[3]) // 4値
+        }
+
+        // shorthandの並び(上, 右, 下, 左)に沿って、right/leftに対応するトークンだけ
+        // "auto"かどうかを見る。値の数によって右・左が同じトークンを共有する場合がある
+        // (例: 1値指定の"auto"は上下左右すべてauto扱いになる)。
+        fun isAuto(token: String) = token.trim().equals("auto", ignoreCase = true)
+        val (rightAuto, leftAuto) = when (tokens.size) {
+            1 -> isAuto(tokens[0]) to isAuto(tokens[0])
+            4 -> isAuto(tokens[1]) to isAuto(tokens[3])
+            else -> isAuto(tokens[1]) to isAuto(tokens[1]) // 2値・3値はどちらも右=左のトークンを共有
+        }
+        return ParsedMargin(edges, leftAuto, rightAuto)
+    }
+
+    /**
+     * margin/padding共通の長さパーサー。px/em/rem/単位なし数値に対応する(2026-08、
+     * px単位のみだった旧parsePxOrZero()を拡張)。
+     *   px    : 絶対値そのまま
+     *   em    : "その要素自身の"計算済みfontSizeを基準に乗算する。font-sizeのem
+     *           (parentFontSize基準)とは基準が異なる点に注意——CSS仕様上、
+     *           margin/paddingのemは常に要素自身のfont-sizeを基準にする。
+     *   rem   : ROOT_FONT_SIZE_PX(簡易実装では16px固定)を基準に乗算
+     *   単位なし: pxとして扱う(旧実装の寛容な挙動を踏襲)
+     *   %     : 今回は非対応(CSS仕様ではmargin/paddingの%はtop/bottom/left/right
+     *           いずれもcontaining blockの"幅"基準になるが、これはStyleResolverの
+     *           時点ではまだ分からずLayoutEngine側のavailableWidthが必要になる。
+     *           BoxEdgesを今のFloatから CssValue ベースへ拡張する必要があり、
+     *           影響範囲が大きいため今回は見送り、0にフォールバックする)
+     * fontSizeには呼び出し時点のstyle.fontSize(このカスケードでここまでに確定した
+     * 値)を渡すこと。同じ要素で"font-size"宣言がmarginより後に来る場合、その宣言が
+     * 反映される前の値を使ってしまう点は既知の制約(この簡易的な逐次カスケード評価
+     * 全体に共通する制約で、font-size自体のem/%解決がparentFontSizeという
+     * "常に確定済みの値"を基準にしているのとは事情が異なる)。
+     *
+     * density対応(2026-08): px/rem/単位なしの各branchはCSS側の値をそのままdensity倍する。
+     * emだけは掛けない——fontSize引数は(parseFontSize側で)既にdensity済みの値として
+     * 渡ってくるので、ここでさらに掛けると二重にスケールしてしまう。
+     */
+    private fun parseLength(value: String, fontSize: Float): Float {
+        val trimmed = value.trim()
+        return when {
+            trimmed.endsWith("rem") -> trimmed.removeSuffix("rem").toFloatOrNull()?.let { it * ROOT_FONT_SIZE_PX * density } ?: 0f
+            trimmed.endsWith("em") -> trimmed.removeSuffix("em").toFloatOrNull()?.let { it * fontSize } ?: 0f
+            trimmed.endsWith("px") -> trimmed.removeSuffix("px").toFloatOrNull()?.let { it * density } ?: 0f
+            else -> trimmed.toFloatOrNull()?.let { it * density } ?: 0f
+        }
+    }
+
+    /**
+     * CSSのmargin/padding shorthand(1〜4値)をBoxEdgesへ展開する。
+     *   1値: 全辺同じ
+     *   2値: 上下, 左右
+     *   3値: 上, 左右, 下
+     *   4値: 上, 右, 下, 左(時計回り)
+     * パース不能な値数の場合は変更前のBoxEdgesをそのまま返す(安全側)。
+     */
+    private fun parseBoxEdgesShorthand(value: String, current: BoxEdges, fontSize: Float): BoxEdges {
+        val parts = value.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.map { parseLength(it, fontSize) }
+        return when (parts.size) {
+            1 -> BoxEdges(parts[0], parts[0], parts[0], parts[0])
+            2 -> BoxEdges(parts[0], parts[1], parts[0], parts[1])
+            3 -> BoxEdges(parts[0], parts[1], parts[2], parts[1])
+            4 -> BoxEdges(parts[0], parts[1], parts[2], parts[3])
+            else -> current
+        }
+    }
+
+    /**
+     * text-align専用パーサー。left/center/rightのみ対応(justifyはTextAlign未定義のため今回は非対応)。
+     * 未対応・パース不能な値は安全側としてLEFTへフォールバックする
+     * (font-sizeと違い、text-alignは「変更前の値を維持」より「規定値に戻す」方が
+     * ブラウザの一般的な挙動に近く、かつ他プロパティでの実装(parseDisplay/parsePosition)とも
+     * パターンが揃うため)。
+     */
+    private fun parseTextAlign(value: String): TextAlign = when (value.trim()) {
+        "center" -> TextAlign.CENTER
+        "right" -> TextAlign.RIGHT
+        "left" -> TextAlign.LEFT
+        else -> TextAlign.LEFT
+    }
+
+    private fun parseDisplay(value: String): Display = when (value.trim()) {
+        "none" -> Display.NONE
+        "flex" -> Display.FLEX
+        "inline" -> Display.INLINE
+        else -> Display.BLOCK
+    }
+
+    private fun parsePosition(value: String): Position = when (value.trim()) {
+        "relative" -> Position.RELATIVE
+        "absolute" -> Position.ABSOLUTE
+        "fixed" -> Position.FIXED
+        "sticky" -> Position.STICKY
+        else -> Position.STATIC
+    }
+
+    /**
+     * density対応(2026-08): Percentは比率なのでdensityを掛ける必要は無い
+     * (適用先のavailableWidth側が既に物理px基準のため、掛けるとそちらと二重になる)。
+     * Pxは絶対値なのでCSS側の値をそのままdensity倍する。
+     */
+    private fun parseCssValue(value: String): CssValue = when {
+        value == "auto" -> CssValue.Auto
+        value.endsWith("%") -> CssValue.Percent(value.removeSuffix("%").toFloatOrNull() ?: 0f)
+        value.endsWith("px") -> CssValue.Px((value.removeSuffix("px").toFloatOrNull() ?: 0f) * density)
+        else -> CssValue.Auto
+    }
+}

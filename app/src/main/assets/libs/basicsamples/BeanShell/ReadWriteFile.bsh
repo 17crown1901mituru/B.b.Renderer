@@ -1,0 +1,66 @@
+    
+   import android.widget.Toast;
+   import android.os.Bundle;
+   import java.io.File;
+   import java.io.FileReader;
+   import java.io.FileWriter;
+   import java.io.BufferedWriter;
+   import java.lang.Exception;
+   import java.lang.StringBuilder;
+   import java.io.BufferedReader;
+   protected void onCreate(Bundle savedInstanceState)
+   {
+      File externalFileStorage = ctx.getFilesDir();
+      File file =  new File(externalFileStorage.getPath()+"/testfile.txt");
+      writeFile(file,"Some text in this file");
+      String txt = readFile(file);
+      popup(txt);
+   }
+   public String readFile(File file)
+   {
+      BufferedReader br =  new BufferedReader( new FileReader(file));
+      StringBuilder sb =  new StringBuilder();
+      try 
+      {
+         String line = br.readLine();
+         while (line !=  null )
+         {
+            sb.append(line);
+            sb.append("\n");
+            line = br.readLine();
+         }
+         
+      }
+      catch (Exception e)
+      {
+         e.printStackTrace();
+      }
+      finally 
+      {
+         br.close();
+      }
+      return sb.toString();
+   }
+   public void writeFile(File file, String content)
+   {
+      BufferedWriter bw =  new BufferedWriter( new FileWriter(file));
+      try 
+      {
+         bw.write(content);
+         bw.flush();
+      }
+      catch (Exception e)
+      {
+         e.printStackTrace();
+      }
+      finally 
+      {
+         bw.close();
+      }
+      
+   }
+   void popup(String txt)
+   {
+      Toast.makeText(ctx,txt,Toast.LENGTH_LONG).show();
+   }
+   

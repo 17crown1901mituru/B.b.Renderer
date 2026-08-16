@@ -1,0 +1,40 @@
+   var Color = Packages.android.graphics.Color;
+   var TextView = Packages.android.widget.TextView;
+   var Build = Packages.android.os.Build;
+   var LinearLayout = Packages.android.widget.LinearLayout;
+   var WindowManager = Packages.android.view.WindowManager;
+   var ViewGroup = Packages.android.view.ViewGroup;
+   var PixelFormat = Packages.android.graphics.PixelFormat;
+   var Gravity = Packages.android.view.Gravity;
+   var Context = Packages.android.content.Context;
+   var windowManager,lay;
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light);
+
+    function onCreate()
+   {
+      ctx.setTitle("Popup Window");
+      windowManager = ctx.getSystemService(Context.WINDOW_SERVICE);
+      lay =  new LinearLayout(ctx);
+      lay.setLayoutParams( new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT,0));
+      var textview =  new TextView(ctx);
+      textview.setLayoutParams( new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT,0));
+      textview.getLayoutParams().setMargins(20,0,20,0);
+      textview.setText("This is a popup window");
+      textview.setTextColor(Color.WHITE);
+      textview.setBackgroundColor(Color.parseColor("#4675aa"));
+      textview.setPadding(15,40,15,40);
+      lay.addView(textview);
+       if (Build.VERSION.SDK_INT>=21)
+      {
+         lay.setElevation(5);
+      }
+      var layoutParams =  new WindowManager.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.TYPE_APPLICATION,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE|WindowManager.LayoutParams.FLAG_FULLSCREEN,PixelFormat.TRANSPARENT);
+      layoutParams.gravity = Gravity.CENTER|Gravity.LEFT;
+      windowManager.addView(lay,layoutParams);
+   }
+
+    function onDestroy()
+   {
+      windowManager.removeView(lay);
+   }
+   

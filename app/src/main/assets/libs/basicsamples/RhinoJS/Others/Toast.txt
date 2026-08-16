@@ -1,0 +1,14 @@
+var Gravity = Packages.android.view.Gravity;
+var Toast = Packages.android.widget.Toast;
+
+//Example 1
+popup("This is a toast");
+
+//Example 2
+Toast.makeText(ctx,"Another Toast",Toast.LENGTH_LONG).show();
+
+
+//Example 3
+var toast = Toast.makeText(ctx,"Another Toast",Toast.LENGTH_LONG);
+toast.setGravity(Gravity.TOP|Gravity.LEFT,100,100);
+toast.show();

@@ -1,0 +1,6 @@
+
+checkArgs("My Arg");
+
+function checkArgs(arg){
+   print(arguments[0])
+}

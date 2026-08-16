@@ -1,0 +1,5 @@
+var isReady = true;
+if(isReady)print("ready");
+
+isReady = false;
+if(isReady)print("ready");

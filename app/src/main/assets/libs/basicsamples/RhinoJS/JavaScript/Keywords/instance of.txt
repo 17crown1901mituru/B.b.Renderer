@@ -1,0 +1,7 @@
+//Example 1
+var array = [1,2,3,"four"];
+print(array instanceof Object);
+print(array instanceof Number);
+print(array instanceof Array);
+
+

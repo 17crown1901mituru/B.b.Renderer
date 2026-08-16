@@ -1,0 +1,11 @@
+var object = {position:"One",color:"Red",length:10};
+
+//Example 1
+for (property in object){
+print(property);
+}
+
+//Example 2
+for (property in object){
+print(object[property]);
+}

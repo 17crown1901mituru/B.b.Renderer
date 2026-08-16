@@ -1,0 +1,16 @@
+   var Color = Packages.android.graphics.Color;
+   var ImageView = Packages.android.widget.ImageView;
+      var color = Color.parseColor("#239866");
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+
+    function onCreate(bundle)
+   {
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      pkg.Utils.setNavigationBarBackgroundColor(ctx,color);
+      ctx.setTitle("Image View");
+      var imgview =  new ImageView(ctx);
+      imgview.setImageResource(pkg.R.drawable.edit);
+      ctx.setContentView(imgview);
+   }
+   

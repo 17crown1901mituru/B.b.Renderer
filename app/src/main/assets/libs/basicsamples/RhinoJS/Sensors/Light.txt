@@ -1,0 +1,57 @@
+   var SensorEvent = Packages.android.hardware.SensorEvent;
+   var Color = Packages.android.graphics.Color;
+   var Gravity = Packages.android.view.Gravity;
+   var TextView = Packages.android.widget.TextView;
+   var LayoutParams = Packages.android.widget.LinearLayout.LayoutParams;
+   var SensorEventListener = Packages.android.hardware.SensorEventListener;
+   var Context = Packages.android.content.Context;
+   var Sensor = Packages.android.hardware.Sensor;
+   var SensorManager = Packages.android.hardware.SensorManager;
+   var mSensorManager;
+   var mLight;
+   var color = Color.parseColor("#236886");
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+
+    function onCreate()
+   {
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      pkg.Utils.setNavigationBarBackgroundColor(ctx,color);
+      ctx.setTitle("Light Sensor");
+      textview =  new TextView(ctx);
+      textview.setTextSize(25);
+      textview.setGravity(Gravity.CENTER);
+      ctx.setContentView(textview);
+      mSensorManager = ctx.getSystemService(Context.SENSOR_SERVICE);
+      mLight = mSensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
+   }
+
+    function onResume()
+   {
+      mSensorManager.registerListener(listener,mLight,SensorManager.SENSOR_DELAY_NORMAL);
+   }
+
+    function onPause()
+   {
+      mSensorManager.unregisterListener(listener);
+   }
+   var listener =  new SensorEventListener()
+   {
+      onAccuracyChanged :  function (sensor,accuracy)
+      {
+         
+      }
+      ,onSensorChanged :  function (event)
+      {
+         //SensorEvent event;
+          if (event.sensor.getType() == Sensor.TYPE_LIGHT)
+         {
+            var txt = "";
+            txt += "Intensity: " + event.values[0]+"\n";
+            textview.setText(txt);
+         }
+         
+      }
+      
+   };
+   
