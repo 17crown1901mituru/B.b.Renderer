@@ -1,8 +1,0 @@
-   var as = new pkg.utils.JASAsyncTask();
-    as.doInBackground(function (p) {
-        print("Run in backgroud");
-    });
-    as.onPostExecute(function (v) {
-        print("After task finish running");
-    });
-    as.execute();

@@ -1,7 +1,0 @@
-
-var isValid = true;
-isValid?print("Is valid"):print("Not valid");
-
-var isCat = false;
-var animal = isCat?"Cat":"Dog";
-print(animal);

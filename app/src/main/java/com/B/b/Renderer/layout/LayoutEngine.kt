@@ -265,6 +265,16 @@ class LayoutEngine(
         }
     }
 
+    /**
+     * インラインテキストの折り返し高さを見積もる。2026-08、実際の描画側
+     * (GLEngineRenderer→TextTextureCache)がandroid.text.StaticLayoutで正確に
+     * 折り返すようになったのに合わせ、こちらの見積もりも「文字数×平均文字幅」という
+     * 大雑把な近似から、Paintによる実測(単語ごとのmeasureText・実フォントメトリクス)に
+     * 変更した。両者とも「単語単位のgreedy折り返し」という同じアルゴリズムなので、
+     * ここでの見積もり高さと実際にStaticLayoutが描画する高さはほぼ一致するはずである
+     * (完全一致を保証するものではない。行末の扱い等の細部はStaticLayoutの内部実装に
+     * 依存するため)。
+     */
     private fun layoutInlineText(
         node: TextNode,
         maxWidth: Float,
@@ -275,19 +285,21 @@ class LayoutEngine(
         val words = node.data.trim().split(Regex("\\s+"))
         if (words.isEmpty() || words == listOf("")) return originY
 
-        val lineHeight = style.fontSize * 1.4f
+        val paint = android.graphics.Paint().apply { textSize = style.fontSize }
+        val spaceWidth = paint.measureText(" ")
+        val fontMetrics = paint.fontMetrics
+        val lineHeight = fontMetrics.bottom - fontMetrics.top
+
         var cursorX = originX
         var cursorY = originY
-        // 簡易近似。正確なグリフ幅は描画層のフォントメトリクス測定に委ねる。
-        val avgCharWidth = style.fontSize * 0.55f
 
         words.forEach { word ->
-            val wordWidth = word.length * avgCharWidth
+            val wordWidth = paint.measureText(word)
             if (cursorX + wordWidth > originX + maxWidth && cursorX > originX) {
                 cursorX = originX
                 cursorY += lineHeight
             }
-            cursorX += wordWidth + avgCharWidth
+            cursorX += wordWidth + spaceWidth
         }
 
         return cursorY + lineHeight

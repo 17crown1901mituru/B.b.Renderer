@@ -14,7 +14,6 @@ import com.B.b.Renderer.input.resolvePaintOrder
 import com.B.b.Renderer.layout.LayoutEngine
 import com.B.b.Renderer.media.JsMediaElement
 import com.B.b.Renderer.style.Display
-import com.B.b.Renderer.style.TextAlign
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
@@ -201,11 +200,17 @@ class GLEngineRenderer(
                 val colorArgb = android.graphics.Color.argb(
                     style.color.a, style.color.r, style.color.g, style.color.b,
                 )
+                // 折り返しの基準幅はコンテンツボックス幅(padding内側)。2026-08対応、
+                // 詳細はTextTextureCache.kt冒頭のコメント参照。
+                val maxWidthPx = (rect.width - style.padding.left.toInt() - style.padding.right.toInt())
+                    .coerceAtLeast(1)
                 val entry = textTextureCache.getOrCreate(
                     seq = element.seq,
                     text = text,
                     fontSizePx = style.fontSize,
                     colorArgb = colorArgb,
+                    maxWidthPx = maxWidthPx,
+                    textAlign = style.textAlign,
                 )
                 if (entry != null) {
                     textDraws.add(element to entry)
@@ -248,8 +253,11 @@ class GLEngineRenderer(
             drawsInPage.forEach { (element, entry) ->
                 val rect = element.computedRect
                 val style = element.computedStyle
+                // 2026-08、text-alignはStaticLayoutによるラスタライズ側(TextTextureCache)で
+                // 行ごとに正しく計算済みなので、ここでは常にコンテンツボックスの左端に
+                // そのまま置くだけでよい(以前のresolveTextDrawX()は不要になったため削除した)。
                 atlasQuadRenderer.addQuad(
-                    x = resolveTextDrawX(rect, style, entry),
+                    x = rect.x.toFloat() + style.padding.left,
                     y = rect.y.toFloat() + style.padding.top,
                     width = entry.width.toFloat(),
                     height = entry.height.toFloat(),
@@ -306,28 +314,14 @@ class GLEngineRenderer(
     }
 
     /**
-     * text-align対応。テキストは要素ごとに単一行のテクスチャとして矩形化されているため、
-     * 「コンテンツボックス(padding内側)の幅」と「テクスチャ実測幅(entry.width)」の差分を
-     * left/center/rightでどう配分するかだけで表現できる(2026-08、StyleResolver側で
-     * text-alignの解決自体は先に対応済みだったが、描画側がrect.x+padding.leftに
-     * 固定決め打ちしていたためcenter/right指定が画面に反映されていなかった問題への対応)。
-     * contentWidthがテクスチャ幅より狭い(=はみ出す)場合はLEFT相当にフォールバックし、
-     * 負のオフセットでテキストがpadding領域より左にはみ出さないようにする。
+     * text-align対応。2026-08、StaticLayoutによるラスタライズ側(TextTextureCache)へ
+     * 責務を移したため、ここにあった以前の実装(entry幅とcontentWidthの差分を
+     * left/center/rightで配分するだけの、複数行を考慮しない簡易版)は削除した。
+     * 複数行に折り返した段落は行ごとに幅が異なるため、単一のオフセット計算では
+     * 正しく揃わない(1行目だけ中央、2行目以降はズレる、といったことが起きる)。
+     * StaticLayoutなら行ごとに正しく計算されたBitmapがそのまま出てくるので、
+     * 描画側は常にコンテンツボックス左端に置くだけでよくなった。
      */
-    private fun resolveTextDrawX(
-        rect: com.B.b.Renderer.core.LayoutRect,
-        style: com.B.b.Renderer.style.ComputedStyle,
-        entry: TextTextureCache.Entry,
-    ): Float {
-        val contentX = rect.x.toFloat() + style.padding.left
-        val contentWidth = rect.width.toFloat() - style.padding.left - style.padding.right
-        val extraSpace = (contentWidth - entry.width.toFloat()).coerceAtLeast(0f)
-        return when (style.textAlign) {
-            TextAlign.LEFT -> contentX
-            TextAlign.CENTER -> contentX + extraSpace / 2f
-            TextAlign.RIGHT -> contentX + extraSpace
-        }
-    }
 
     /**
      * 2回目以降のナビゲーション用。GLSurfaceView.setRenderer()はインスタンスにつき1回しか

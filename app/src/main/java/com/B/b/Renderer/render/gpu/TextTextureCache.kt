@@ -4,6 +4,10 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import com.B.b.Renderer.style.TextAlign
 
 /**
  * テキストをBitmapへラスタライズし、共有アトラス(TextAtlas)へ敷き詰める。
@@ -11,6 +15,13 @@ import android.graphics.Paint
  *
  * 以前は「1要素1テクスチャ・1drawCall」だったが、複数要素を同じアトラスページに集約することで
  * drawCall数を「テキスト要素数」ではなく「アトラスページ数」(通常1)に削減する。
+ *
+ * 2026-08、複数行折り返し対応。以前は`Paint.measureText()`で1行のビットマップとして
+ * ラスタライズしており、ボックス幅を無視して常に横一直線に描画していた
+ * (density対応で文字が大きくなったことで、長い段落がアトラスページのサイズ上限を
+ * 超えて描画自体が消える事故につながった)。`android.text.StaticLayout`
+ * (Android SDK標準。Unicode基準の改行位置判定を内蔵)に置き換え、実際に複数行へ
+ * 折り返した上でラスタライズするようにした。
  */
 class TextTextureCache {
 
@@ -28,38 +39,70 @@ class TextTextureCache {
     /** ページ数がこれを超えたら、生存中のエントリのみを残して作り直す(簡易デフラグ) */
     private val rebuildPageThreshold = 4
 
+    /**
+     * @param maxWidthPx 折り返しの基準になる、要素のコンテンツボックス幅(px)。
+     *   text-alignがcenter/rightの場合、行ごとの配置がこの幅を基準に計算されるため、
+     *   ラスタライズ後のBitmapの意味も変わる(下記rasterize()参照)。
+     */
     fun getOrCreate(
         seq: Long,
         text: String,
         fontSizePx: Float,
         colorArgb: Int,
+        maxWidthPx: Int,
+        textAlign: TextAlign,
     ): Entry? {
         if (text.isBlank()) return null
-        val contentHash = "$text|$fontSizePx|$colorArgb".hashCode()
+        val safeMaxWidth = maxWidthPx.coerceAtLeast(1)
+        val contentHash = "$text|$fontSizePx|$colorArgb|$safeMaxWidth|$textAlign".hashCode()
 
         cache[seq]?.let { existing ->
             if (existing.contentHash == contentHash) return existing
         }
 
-        val bitmap = rasterize(text, fontSizePx, colorArgb)
+        val bitmap = rasterize(text, fontSizePx, colorArgb, safeMaxWidth, textAlign)
         val entry = allocateAndUpload(seq, bitmap, contentHash)
         bitmap.recycle()
         return entry
     }
 
-    private fun rasterize(text: String, fontSizePx: Float, colorArgb: Int): Bitmap {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    /**
+     * center/rightは、StaticLayoutが行ごとの配置をmaxWidthPx基準で計算するため、
+     * その計算結果をそのまま活かせるようBitmapもmaxWidthPxいっぱいの幅で作る
+     * (ここで切り詰めてしまうと、center/rightの位置計算だけが空白の無い狭いBitmap基準に
+     * ズレてしまう)。leftは単に各行を左詰めで描くだけなので、実際に使われた最大行幅まで
+     * 切り詰めてアトラスの消費を抑える。
+     */
+    private fun rasterize(text: String, fontSizePx: Float, colorArgb: Int, maxWidthPx: Int, textAlign: TextAlign): Bitmap {
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = fontSizePx
             color = colorArgb
         }
-        val width = paint.measureText(text).toInt().coerceAtLeast(1)
-        val fontMetrics = paint.fontMetrics
-        val height = (fontMetrics.bottom - fontMetrics.top).toInt().coerceAtLeast(1)
+        val alignment = when (textAlign) {
+            TextAlign.CENTER -> Layout.Alignment.ALIGN_CENTER
+            TextAlign.RIGHT -> Layout.Alignment.ALIGN_OPPOSITE
+            TextAlign.LEFT -> Layout.Alignment.ALIGN_NORMAL
+        }
+        val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, maxWidthPx)
+            .setAlignment(alignment)
+            .setIncludePad(false)
+            .build()
 
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmapWidth = if (textAlign == TextAlign.LEFT) {
+            var maxLineWidth = 0f
+            for (i in 0 until layout.lineCount) {
+                maxLineWidth = maxOf(maxLineWidth, layout.getLineWidth(i))
+            }
+            maxLineWidth.toInt().coerceAtLeast(1)
+        } else {
+            maxWidthPx
+        }
+        val bitmapHeight = layout.height.coerceAtLeast(1)
+
+        val bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(AndroidColor.TRANSPARENT)
-        canvas.drawText(text, 0f, -fontMetrics.top, paint)
+        layout.draw(canvas)
         return bitmap
     }
 
@@ -84,15 +127,13 @@ class TextTextureCache {
         pages.add(newPage)
         val region = newPage.allocate(bitmap.width, bitmap.height)
         if (region == null) {
-            // まっさらな新規ページにすら入らない=1要素のテキストがアトラス1枚分の
-            // サイズ(4096px、TextAtlas.kt参照)そのものを超えている状態。折り返し
-            // 未実装で1行ビットマップとして扱っている以上起こり得るため、無言で
-            // 消すのではなくログに残す(2026-08対応。density対応で文字が大きくなり、
-            // 実際にこのケースが発生したため)。
+            // まっさらな新規ページにすら入らない状態。折り返し対応後はmaxWidthPx
+            // (要素のコンテンツボックス幅)を超えることはまず無いが、極端に幅の広い
+            // ボックス、または非常に多くの行を持つ要素だと起こり得るため、無言で
+            // 消すのではなくログに残す(2026-08対応)。
             com.B.b.Renderer.debug.BehaviorAuditLog.record(
                 com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
-                "text texture too large for atlas page: ${bitmap.width}x${bitmap.height} " +
-                    "(要テキスト折り返し実装。1行ビットマップのままでは今後も起こり得る)",
+                "text texture too large for atlas page: ${bitmap.width}x${bitmap.height}",
             )
             return null
         }
