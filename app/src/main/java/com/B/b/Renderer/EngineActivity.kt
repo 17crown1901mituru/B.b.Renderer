@@ -504,6 +504,16 @@ class EngineActivity : AppCompatActivity() {
             val styleResolver = StyleResolver(stylesheet, density = displayMetrics.density)
             styleResolver.resolveTree(root)
 
+            // 2026-08、診断用。CSS取得〜解決の経路のどこで想定と食い違っているか
+            // (fetchStylesheets自体が空を返している/パース結果のルール数がおかしい等)を
+            // 切り分けるためのログ。margin:auto中央寄せがexample.comで反映されない
+            // 事象の調査用に追加。
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "css fetched: ${css.length} chars, rules parsed: ${stylesheet.rules.size}, " +
+                    "preview=${css.take(120).replace("\n", " ")}",
+            )
+
             // onImageNeededの中でlayoutEngine自身(scheduleLayoutPass呼び出し用)を参照する
             // 必要があるが、コンストラクタ引数の時点ではまだ変数が存在しないため、
             // 既存のjsEngineRefと同じ「lateinit var+後から代入」パターンで自己参照する。
