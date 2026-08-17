@@ -82,7 +82,20 @@ class TextTextureCache {
 
         val newPage = TextAtlas().apply { init() }
         pages.add(newPage)
-        val region = newPage.allocate(bitmap.width, bitmap.height) ?: return null
+        val region = newPage.allocate(bitmap.width, bitmap.height)
+        if (region == null) {
+            // まっさらな新規ページにすら入らない=1要素のテキストがアトラス1枚分の
+            // サイズ(4096px、TextAtlas.kt参照)そのものを超えている状態。折り返し
+            // 未実装で1行ビットマップとして扱っている以上起こり得るため、無言で
+            // 消すのではなくログに残す(2026-08対応。density対応で文字が大きくなり、
+            // 実際にこのケースが発生したため)。
+            com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
+                "text texture too large for atlas page: ${bitmap.width}x${bitmap.height} " +
+                    "(要テキスト折り返し実装。1行ビットマップのままでは今後も起こり得る)",
+            )
+            return null
+        }
         newPage.upload(region, bitmap)
         val entry = Entry(pages.lastIndex, region, bitmap.width, bitmap.height, contentHash)
         cache[seq] = entry

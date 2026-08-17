@@ -5,8 +5,18 @@ import android.opengl.GLES30
 import android.opengl.GLUtils
 
 /**
- * 固定サイズ(デフォルト2048x2048)のテクスチャ1枚に、複数のテキストラスタライズ結果を
+ * 固定サイズ(デフォルト4096x4096)のテクスチャ1枚に、複数のテキストラスタライズ結果を
  * 「棚(shelf)」方式で敷き詰めるアトラス。
+ *
+ * 2026-08、2048→4096へ拡大。CSS px→物理px変換(density対応)により文字サイズが
+ * 実機density倍(この種の端末ではおおよそ3倍前後)になった結果、長めの段落が
+ * 1行の巨大なビットマップとして2048pxを超え、allocate()が無言でnullを返し
+ * テキストごと描画スキップされる(=画面から消える)事故が起きたための対応。
+ * 現状は各要素のテキストを折り返し無しの1行ビットマップとして扱っているため
+ * (複数行の折り返し自体が未実装)、このサイズを超える極端に長い1要素は
+ * 依然として同じ問題を起こり得る。根本的にはテキストの複数行折り返し
+ * (LayoutEngine.layoutInlineTextの高さ計算はあるが実描画には未反映)の実装が
+ * 必要で、これは今後の優先度を上げて検討する価値がある。
  *
  * GL_TEXTURE_2Dを1枚だけ確保し、以降はglTexSubImage2Dで該当領域だけを更新する
  * (テクスチャ全体の再アップロードは発生しない)。allocate()が満杯でnullを返したら、
@@ -15,7 +25,7 @@ import android.opengl.GLUtils
  * 制約: 一度確保した領域を個別に解放する機能は無い(shelfは前進のみ)。
  * 大量のテキスト変化で領域が枯渇した場合はTextTextureCache側でページ全体を作り直す。
  */
-class TextAtlas(private val size: Int = 2048) {
+class TextAtlas(private val size: Int = 4096) {
 
     data class Region(val u0: Float, val v0: Float, val u1: Float, val v1: Float)
 
