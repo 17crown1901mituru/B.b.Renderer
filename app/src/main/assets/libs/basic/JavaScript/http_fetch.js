@@ -1,0 +1,1 @@
+fetch("http://example.com").then(r => r.text()).then(t => console.log(t.slice(0, 20))).catch(e => console.error(e));

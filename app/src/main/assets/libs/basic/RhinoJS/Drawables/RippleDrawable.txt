@@ -1,0 +1,39 @@
+   var Gravity = Packages.android.view.Gravity;
+   var ColorStateList = Packages.android.content.res.ColorStateList;
+   var PaintDrawable = Packages.android.graphics.drawable.PaintDrawable;
+   var RippleDrawable = Packages.android.graphics.drawable.RippleDrawable;
+   var Button = Packages.android.widget.Button;
+   var LinearLayout = Packages.android.widget.LinearLayout;
+   var Color = Packages.android.graphics.Color;
+   var color = Color.RED;
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+
+    function onCreate()
+   {
+      ctx.setTitle("Ripple Drawable");
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      var drawable = getDrawable(color,Color.BLUE);
+      lay =  new LinearLayout(ctx);
+      lay.setGravity(Gravity.CENTER);
+      btn =  new Button(ctx);
+      btn.setTextColor(Color.WHITE);
+      btn.setText("click");
+      btn.setBackgroundDrawable(drawable);
+      lay.addView(btn);
+      ctx.setContentView(lay);
+   }
+
+    function getDrawable(backgroundColor,rippleColor)
+   {
+      var drawable,pdrawable;
+      var states = [[android.R.attr.state_pressed],[-android.R.attr.state_pressed]];
+      var colors = [rippleColor,backgroundColor];
+      var csl =  new ColorStateList(states,colors);
+      pdrawable =  new PaintDrawable(backgroundColor);
+      pdrawable.setCornerRadius(20);
+      drawable =  new RippleDrawable(csl,pdrawable,pdrawable);
+      drawable.setRadius(100);
+       return drawable;
+   }
+   

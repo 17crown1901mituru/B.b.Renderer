@@ -1,0 +1,22 @@
+   var BluetoothAdapter = Packages.android.bluetooth.BluetoothAdapter;
+   var bAdapter = BluetoothAdapter.getDefaultAdapter();
+   //check if is enabled
+   var isEnabled = bAdapter.isEnabled();
+   //Enable bluetooth;
+    if (!isEnabled)
+   {
+      bAdapter.enable();
+      popup("Bluetooth enabled");
+   }
+    else 
+   {
+      popup("Bluetooth already enabled");
+   }
+
+   //Called by system when app exits
+    function onDestroy()
+   {
+      bAdapter.disable();
+      popup("Bluetooth disabled");
+   }
+   

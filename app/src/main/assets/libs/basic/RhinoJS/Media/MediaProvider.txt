@@ -1,0 +1,33 @@
+   // Shows a list of all videos in your device, you can also query audios photos or documents    
+   var MediaStore = Packages.android.provider.MediaStore;
+   var videos = "";
+   var videoPaths = "";
+   bTask( function ()
+   {
+      popup("Loading videos...");
+      queryVideos(2,1);
+   }
+   , function ()
+   {
+      alert(videos,"Videos");
+   });
+
+    function queryVideos(sortType,orderBy)
+   {
+      var sortOrder = [" ASC"," DESC"];
+      var sortBy = ["TITLE","SIZE","DATE_MODIFIED","DURATION"];
+      var columns = [MediaStore.Video.Media._ID,MediaStore.Video.Media.TITLE,MediaStore.Video.Media.DATA];
+      var cursor = ctx.getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,columns, null , null ,MediaStore.Video.Media[sortBy[sortType]]+sortOrder[orderBy]);
+      var i = 0;
+      while (cursor.moveToNext())
+      {
+         i++;
+         var id = cursor.getString(cursor.getColumnIndex(MediaStore.Video.Media._ID));
+         var title = cursor.getString(cursor.getColumnIndex(MediaStore.Video.Media.TITLE));
+         var path = cursor.getString(cursor.getColumnIndex(MediaStore.Video.Media.DATA));
+         videos+=(id + ". " + title + "\n\n");
+         videoPaths+=(i + ". " + path + "\n\n");
+      }
+      cursor.close();
+   }
+   

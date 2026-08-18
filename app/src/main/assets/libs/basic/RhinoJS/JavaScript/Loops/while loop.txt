@@ -1,0 +1,23 @@
+function onCreate()
+   {
+      let array = ["One","Two","Three","Four","Five"];
+      let len = array.length;
+
+      //Example 1
+      var i = 0;
+      while (i<len)
+      {
+         //   print(array[i]);
+         i++;
+      }
+       //Example 2
+      i = 0;
+      while ( true )
+      {
+         print(array[i]);
+         i++;
+          if (i>=len) break ;
+      }
+      
+   }
+   

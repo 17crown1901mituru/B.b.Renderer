@@ -1,0 +1,47 @@
+   var LinearLayout = Packages.android.widget.LinearLayout;
+   var Gravity = Packages.android.view.Gravity;
+   var Button = Packages.android.widget.Button;
+   var Color = Packages.android.graphics.Color;
+   var PopupMenu = Packages.android.widget.PopupMenu;
+   var Menu = Packages.android.view.Menu;
+   var options = ["Option 1","Option 2","Option 3"," Option 4"];
+   var pm;
+
+    function onCreate()
+   {
+      ctx.setTitle("Popup Menu");
+      lay =  new LinearLayout(ctx);
+      lay.setGravity(Gravity.CENTER);
+      btn =  new Button(ctx);
+      btn.setTextColor(Color.WHITE);
+      btn.setText("Show menu");
+      btn.setOnClickListener( function ()
+      {
+         pm.show();
+      });
+      lay.addView(btn);
+      ctx.setContentView(lay);
+      pm =  new PopupMenu(ctx,btn);
+      var menu = pm.getMenu();
+      menu.clear();
+      for (let x = 0;x<options.length;x++)
+      {
+         menu.add(Menu.NONE,x,Menu.NONE,options[x]);
+      }
+      pm.setOnMenuItemClickListener( function (item)
+      {
+         switch (item.getItemId())
+         {
+            case 0:popup(options[0]);
+             break ;
+            case 1:popup(options[1]);
+             break ;
+            case 2:popup(options[2]);
+             break ;
+            case 3:popup(options[3]);
+             break ;
+         }
+          return  true ;
+      });
+   }
+   

@@ -1,0 +1,61 @@
+   var TextView = Packages.android.widget.TextView;
+   // A menu that appears on top of action bar
+   var ActionMode = Packages.android.view.ActionMode;
+   var Color = Packages.android.graphics.Color;
+   var ArrayAdapter = Packages.android.widget.ArrayAdapter;
+   var ListView = Packages.android.widget.ListView;
+   var Arrays = Packages.java.util.Arrays;
+   var listview,adapter;
+   var color = Color.parseColor("#364567");
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+   ctx.setTitle("Action Mode");
+   
+    function onCreate()
+   {
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      ctx.getActionBar().setSubtitle("Long press list items");
+      adapter =  new ArrayAdapter(ctx,pkg.R.layout.list_item_text);
+      listview =  new ListView(ctx);
+      listview.setAdapter(adapter);
+      listview.setOnItemLongClickListener( function (parent,view,position,id)
+      {
+         startActionMode(parent.getItemAtPosition(position));
+          return  true ;
+      });
+      adapter.addAll(Arrays.asList(["Item1","Item2","Item3"]));
+      ctx.setContentView(listview);
+   }
+
+    function startActionMode(title)
+   {
+      //ActionMode am;
+      var am = ctx.startActionMode(
+      {
+         onCreateActionMode :  function (am,menu)
+         {
+            menu.clear();
+            menu.add("Delete");
+             return  true ;
+         }
+         ,onPrepareActionMode :  function (am,menu)
+         {
+            menu.clear();
+            menu.add("Delete");
+            menu.add("Rename");
+            menu.add("Clear");
+             return  true ;
+         }
+         ,onActionItemClicked :  function (am,item)
+         {
+             return  true ;
+         }
+         ,onDestroyActionMode :  function (am)
+         {
+            
+         }
+         
+      });
+      am.setTitle(title);
+   }
+   

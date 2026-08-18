@@ -1,0 +1,58 @@
+   var FileWriter = Packages.java.io.FileWriter;
+   var BufferedWriter = Packages.java.io.BufferedWriter;
+   var File = Packages.java.io.File;
+   var StringBuilder = Packages.java.lang.StringBuilder;
+   var BufferedReader = Packages.java.io.BufferedReader;
+   var FileReader = Packages.java.io.FileReader;
+
+   var externalFileStorage = ctx.getFilesDir();
+   var file =  new File(externalFileStorage.getPath()+"/testfile.txt");
+   writeFile(file,"Some text in this file");
+   var txt = readFile(file);
+   alert(txt);
+
+    function readFile(file)
+   {
+      var br =  new BufferedReader( new FileReader(file));
+      var sb =  new StringBuilder();
+      try 
+      {
+         var line = br.readLine();
+         while (line !=  null )
+         {
+            sb.append(line);
+            sb.append("\n");
+            line = br.readLine();
+         }
+         
+      }
+       catch (e)
+      {
+         e.printStackTrace();
+      }
+       finally 
+      {
+         br.close();
+      }
+       return sb.toString();
+   }
+
+    function writeFile(file,content)
+   {
+      var bw =  new BufferedWriter( new FileWriter(file));
+      try 
+      {
+         bw.write(content);
+         bw.flush();
+      }
+       catch (e)
+      {
+         e.printStackTrace();
+      }
+       finally 
+      {
+         bw.close();
+      }
+      
+   }
+   

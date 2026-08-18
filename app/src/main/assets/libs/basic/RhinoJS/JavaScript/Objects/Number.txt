@@ -1,0 +1,15 @@
+   var num = 55;
+   var num2 = Number(199);
+   var num3 = num + num2;
+   var num4 = num2 - num;
+   var num5 = num * num2;
+   var num6 = num / num2;
+   var num7 = num6.toFixed(2);
+   
+   print(num2);
+   print(isNaN(num));
+   print(num3);
+   print(num4);
+   print(num5);
+   print(num6);
+   print(num7);

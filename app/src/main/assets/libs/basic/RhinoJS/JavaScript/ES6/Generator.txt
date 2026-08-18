@@ -1,0 +1,18 @@
+
+   var generator = getNextNumber();
+   alert(generator.next());
+   alert(generator.next());
+   alert(generator.next());
+   ctx.finish();
+   
+   
+   
+   function getNextNumber()
+   {
+      let num = 0;
+      while ( true )
+      {
+          yield num++;
+      }
+      
+   }

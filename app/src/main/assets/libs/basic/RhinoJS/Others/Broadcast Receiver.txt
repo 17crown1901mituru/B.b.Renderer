@@ -1,0 +1,82 @@
+   var Icon = Packages.android.graphics.drawable.Icon;
+   var BitmapFactory = Packages.android.graphics.BitmapFactory;
+   var Context = Packages.android.content.Context;
+   var NotificationChannel = Packages.android.app.NotificationChannel;
+   var NotificationManager = Packages.android.app.NotificationManager;
+   var IntentFilter = Packages.android.content.IntentFilter;
+   var Intent = Packages.android.content.Intent;
+   var PendingIntent = Packages.android.app.PendingIntent;
+   var Notification = Packages.android.app.Notification;
+   var filter = "NOTIFICATION_BROADCAST";
+   var isPlaying =  false ;
+   var title = "Music title";
+   var details = "Music details";
+   var notificationChannel;
+   var notificationChannelId = "6474";
+   var notifyId = 7465;
+   var notificationManager = ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+    if (android.os.Build.VERSION.SDK_INT>=26)
+   {
+      notificationChannel =  new NotificationChannel(notificationChannelId,"Test",NotificationManager.IMPORTANCE_DEFAULT);
+      notificationChannel.setDescription("Test Notification");
+      notificationManager.createNotificationChannel(notificationChannel);
+   }
+
+    function onCreate(bundle)
+   {
+      var br =  new pkg.utils.JASBroadcastReceiver();
+      br.setListener( function (context,intent)
+      {
+         var action = intent.getStringExtra("action");
+          if (action == "prev")
+         {
+            popup("prev");
+         }
+          else  if (action == "next")
+         {
+            popup("next");
+         }
+          else 
+         {
+            playPause();
+            popup(isPlaying?"playing":"paused");
+         }
+         
+      });
+      ctx.registerReceiver(br, new IntentFilter(filter));
+      notify(title,details,isPlaying);
+   }
+
+    function playPause()
+   {
+      isPlaying = isPlaying? false : true ;
+      notify(title,details,isPlaying);
+   }
+
+    function notify(title,message,state)
+   {
+      var intent =  new Intent(ctx,pkg.Plugins);
+      intent.putExtra("scriptPath",ctx.getScriptPath());
+      intent.setFlags(Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT);
+      myIntent1 =  new Intent(filter);
+      myIntent1.putExtra("action","prev");
+      myIntent2 =  new Intent(filter);
+      myIntent2.putExtra("action","play");
+      myIntent2.putExtra("url",message);
+      myIntent3 =  new Intent(filter);
+      myIntent3.putExtra("action","next");
+      var pIntent0 = PendingIntent.getActivity(ctx,0,intent,PendingIntent.FLAG_UPDATE_CURRENT);
+      var pIntent1 = PendingIntent.getBroadcast(ctx,0,myIntent1,PendingIntent.FLAG_UPDATE_CURRENT);
+      var pIntent2 = PendingIntent.getBroadcast(ctx,1,myIntent2,PendingIntent.FLAG_UPDATE_CURRENT);
+      var pIntent3 = PendingIntent.getBroadcast(ctx,2,myIntent3,PendingIntent.FLAG_UPDATE_CURRENT);
+      var notificationBuilder =  new Notification.Builder(ctx).setContentTitle(title).setContentText(message).setTicker(title).setContentIntent(pIntent0).setSmallIcon(Icon.createWithBitmap(BitmapFactory.decodeResource(ctx.getResources(),pkg.R.drawable.ic_launcher))).addAction(android.R.drawable.ic_media_previous,"",pIntent1).addAction((state)?android.R.drawable.ic_media_pause:android.R.drawable.ic_media_play,"",pIntent2).addAction(android.R.drawable.ic_media_next,"",pIntent3).setOngoing( true );
+       if (notificationChannel)notificationBuilder.setChannelId(notificationChannelId);
+      var notification = notificationBuilder.build();
+      notificationManager.notify(notifyId,notification);
+   }
+
+    function onDestroy()
+   {
+      notificationManager.cancel(notifyId);
+   }
+   

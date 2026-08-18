@@ -500,8 +500,19 @@ class EngineActivity : AppCompatActivity() {
             // displayMetricsはこの後のLayoutEngine構築でも使うため、ここに繰り上げてある。
             val displayMetrics = resources.displayMetrics
             val cssPxViewportWidth = displayMetrics.widthPixels / displayMetrics.density
+            // vw/vh解決用。高さはusableHeightPx(アドレスバー+システムバー分を除いた
+            // 実描画高さ、物理px)をCSS px化したもの。widthPixelsをそのまま使うwidthと
+            // 違い、高さは生のdisplayMetrics.heightPixelsではなくこちらを使う必要がある
+            // (詳細はusableContentHeightPx()のコメント参照。同じ理由でLayoutEngineの
+            // viewportHeightもusableHeightPxを使っている)。
+            val cssPxViewportHeight = usableHeightPx / displayMetrics.density
             val stylesheet = CssParser().parse(css, viewportWidth = cssPxViewportWidth)
-            val styleResolver = StyleResolver(stylesheet, density = displayMetrics.density)
+            val styleResolver = StyleResolver(
+                stylesheet,
+                density = displayMetrics.density,
+                viewportWidthCssPx = cssPxViewportWidth,
+                viewportHeightCssPx = cssPxViewportHeight,
+            )
             styleResolver.resolveTree(root)
 
             // 2026-08、診断用。CSS取得〜解決の経路のどこで想定と食い違っているか

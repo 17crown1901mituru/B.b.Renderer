@@ -21,6 +21,12 @@ class StyleResolver(
     // 今まで通り「物理px基準のワールド座標」として扱われる(GLの投影行列・タッチ入力・
     // アクセシビリティ座標など、他の座標系には一切手を入れずに済む設計にしてある)。
     private val density: Float = 1f,
+    // 2026-08対応。vw/vh(ビューポート幅/高さに対する相対単位)を解決するために必要。
+    // CSS px基準(=物理px÷density。@mediaのviewportWidth判定と同じ考え方)で受け取り、
+    // parseLength/parseCssValue内でdensityを掛け直して最終的に物理px相当の値にする
+    // (densityの掛け方はpx/em/rem等、他の単位と同じ流儀に揃えてある)。
+    private val viewportWidthCssPx: Float = 0f,
+    private val viewportHeightCssPx: Float = 0f,
 ) {
 
     companion object {
@@ -145,17 +151,18 @@ class StyleResolver(
     }
 
     /**
-     * font-size専用パーサー。px/em/%/remに対応する。
+     * font-size専用パーサー。px/em/%/rem/vw/vhに対応する。
      *   px : 絶対値(density倍する。下記density対応参照)
      *   em : parentFontSize(継承元の計算済みfontSize)を基準に乗算
      *   %  : 同じくparentFontSizeを基準にした百分率
      *   rem: ROOT_FONT_SIZE_PX(簡易実装では16px固定)を基準に乗算
+     *   vw/vh: ビューポート幅/高さ(CSS px基準)に対する百分率
      * 未対応の単位・パース不能な値は、UserAgentStylesの32px等が
      * 無言で16pxに化けていた旧不具合(parsePx()の暗黙フォールバック)を
      * 繰り返さないよう、「変更前のfontSizeを維持する」(=このdeclarationは無視する)
      * という安全側の挙動にする。16fへの固定フォールバックは行わない。
      *
-     * density対応(2026-08): pxとremはCSS側の値をそのままdensity倍する。em/%は
+     * density対応(2026-08): px/rem/vw/vhはCSS側の値をそのままdensity倍する。em/%は
      * parentFontSizeに対する相対値で、parentFontSize自体が既にdensity済みなので
      * 二重に掛けない(parseLengthのem branchと同じ考え方)。
      */
@@ -166,6 +173,8 @@ class StyleResolver(
             trimmed.endsWith("em") -> trimmed.removeSuffix("em").toFloatOrNull()?.let { it * parentFontSize } ?: currentFontSize
             trimmed.endsWith("%") -> trimmed.removeSuffix("%").toFloatOrNull()?.let { it / 100f * parentFontSize } ?: currentFontSize
             trimmed.endsWith("rem") -> trimmed.removeSuffix("rem").toFloatOrNull()?.let { it * ROOT_FONT_SIZE_PX * density } ?: currentFontSize // ルート基準remは簡易実装では16px固定基準
+            trimmed.endsWith("vw") -> trimmed.removeSuffix("vw").toFloatOrNull()?.let { it / 100f * viewportWidthCssPx * density } ?: currentFontSize
+            trimmed.endsWith("vh") -> trimmed.removeSuffix("vh").toFloatOrNull()?.let { it / 100f * viewportHeightCssPx * density } ?: currentFontSize
             else -> currentFontSize
         }
     }
@@ -226,12 +235,18 @@ class StyleResolver(
      * density対応(2026-08): px/rem/単位なしの各branchはCSS側の値をそのままdensity倍する。
      * emだけは掛けない——fontSize引数は(parseFontSize側で)既にdensity済みの値として
      * 渡ってくるので、ここでさらに掛けると二重にスケールしてしまう。
+     *
+     * vw/vh対応(2026-08): ビューポート幅/高さ(CSS px基準、コンストラクタ引数
+     * viewportWidthCssPx/viewportHeightCssPx)に対する百分率として解決し、density倍する。
+     * vmin/vmaxは今回非対応(0にフォールバック)。
      */
     private fun parseLength(value: String, fontSize: Float): Float {
         val trimmed = value.trim()
         return when {
             trimmed.endsWith("rem") -> trimmed.removeSuffix("rem").toFloatOrNull()?.let { it * ROOT_FONT_SIZE_PX * density } ?: 0f
             trimmed.endsWith("em") -> trimmed.removeSuffix("em").toFloatOrNull()?.let { it * fontSize } ?: 0f
+            trimmed.endsWith("vw") -> trimmed.removeSuffix("vw").toFloatOrNull()?.let { it / 100f * viewportWidthCssPx * density } ?: 0f
+            trimmed.endsWith("vh") -> trimmed.removeSuffix("vh").toFloatOrNull()?.let { it / 100f * viewportHeightCssPx * density } ?: 0f
             trimmed.endsWith("px") -> trimmed.removeSuffix("px").toFloatOrNull()?.let { it * density } ?: 0f
             else -> trimmed.toFloatOrNull()?.let { it * density } ?: 0f
         }
@@ -290,9 +305,25 @@ class StyleResolver(
      * (適用先のavailableWidth側が既に物理px基準のため、掛けるとそちらと二重になる)。
      * Pxは絶対値なのでCSS側の値をそのままdensity倍する。
      */
+    /**
+     * density対応(2026-08): Percentは比率なのでdensityを掛ける必要は無い
+     * (適用先のavailableWidth側が既に物理px基準のため、掛けるとそちらと二重になる)。
+     * Pxは絶対値なのでCSS側の値をそのままdensity倍する。
+     *
+     * vw/vh対応(2026-08): ビューポート幅/高さ(CSS px基準)に対する百分率として
+     * 物理pxへ解決し、CssValue.Pxとして返す(width/heightの場合、vw/vhはcontaining
+     * blockではなく常にビューポート基準なので、レイアウト時に解決するPercentとは
+     * 扱いを分け、StyleResolverの時点でPxへ確定させてしまう)。
+     */
     private fun parseCssValue(value: String): CssValue = when {
         value == "auto" -> CssValue.Auto
         value.endsWith("%") -> CssValue.Percent(value.removeSuffix("%").toFloatOrNull() ?: 0f)
+        value.endsWith("vw") -> CssValue.Px(
+            (value.removeSuffix("vw").toFloatOrNull() ?: 0f) / 100f * viewportWidthCssPx * density,
+        )
+        value.endsWith("vh") -> CssValue.Px(
+            (value.removeSuffix("vh").toFloatOrNull() ?: 0f) / 100f * viewportHeightCssPx * density,
+        )
         value.endsWith("px") -> CssValue.Px((value.removeSuffix("px").toFloatOrNull() ?: 0f) * density)
         else -> CssValue.Auto
     }

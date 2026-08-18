@@ -1,0 +1,45 @@
+   var SpannableString = Packages.android.text.SpannableString;
+   var TypefaceSpan = Packages.android.text.style.TypefaceSpan;
+   var ForegroundColorSpan = Packages.android.text.style.ForegroundColorSpan;
+   var Spannable = Packages.android.text.Spannable;
+   var InputType = Packages.android.text.InputType;
+   var Button = Packages.android.widget.Button;
+   var Color = Packages.android.graphics.Color;
+   var TextView = Packages.android.widget.TextView;
+   var Gravity = Packages.android.view.Gravity;
+   var LinearLayout = Packages.android.widget.LinearLayout;
+   var color = Color.parseColor("#f36836");
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+   var lay,tv;
+
+    function onCreate()
+   {
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      //pkg.Utils.setNavigationBarBackgroundColor(ctx,color);
+      ctx.setTitle("TextView");
+      lay =  new LinearLayout(ctx);
+      lay.setOrientation(LinearLayout.VERTICAL);
+      lay.setGravity(Gravity.CENTER);
+      
+      tv0 =  new TextView(ctx);
+      tv0.setPadding(10,10,10,10);
+      tv0.setLayoutParams( new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,LinearLayout.LayoutParams.WRAP_CONTENT,0));
+      tv0.setText("Some Text");
+      lay.addView(tv0);
+      
+      tv =  new TextView(ctx);
+      tv.setLayoutParams( new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,LinearLayout.LayoutParams.WRAP_CONTENT,0));
+      tv.setInputType(InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+      tv.setOnClickListener( function ()
+      {
+         popup("Clicked");
+      });
+      tv.setGravity(Gravity.CENTER);
+      var spanString =  new SpannableString("This is a text view");
+      spanString.setSpan( new ForegroundColorSpan(Color.BLUE),5,12,Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+      tv.setText(spanString);
+      lay.addView(tv);
+      ctx.setContentView(lay);
+   }
+   

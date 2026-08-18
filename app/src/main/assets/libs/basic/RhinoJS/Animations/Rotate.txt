@@ -1,0 +1,46 @@
+   var ViewPropertyAnimator = Packages.android.view.ViewPropertyAnimator;
+   var ValueAnimator = Packages.android.animation.ValueAnimator;
+   var Color = Packages.android.graphics.Color;
+   var Gravity = Packages.android.view.Gravity;
+   var ImageView = Packages.android.widget.ImageView;
+   var LinearLayout = Packages.android.widget.LinearLayout;
+   var color = Color.parseColor("#236846");
+
+    function onCreate(bundle)
+   {
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      pkg.Utils.setNavigationBarBackgroundColor(ctx,color);
+      ctx.setTitle("Rotate Animation");
+      lay =  new LinearLayout(ctx);
+      lay.setBackgroundColor(Color.WHITE);
+      lay.setGravity(Gravity.CENTER);
+      image =  new ImageView(ctx);
+      image.setRotationX(0);
+      image.setRotationY(0);
+      image.setLayoutParams( new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,LinearLayout.LayoutParams.WRAP_CONTENT,0));
+      image.setImageResource(pkg.R.drawable.ic_launcher);
+      lay.addView(image);
+      ctx.setContentView(lay);
+      //ViewPropertyAnimator anim;
+      var anim = image.animate();
+      anim.setListener( new AnimationListener());
+      anim.rotationX(360).rotationY(3600).x(400).setDuration(3000).start();
+   }
+
+    function AnimationListener()
+   {
+       this .onAnimationStart =  function ()
+      {
+         
+      };
+       this .onAnimationPause =  function ()
+      {
+         
+      };
+       this .onAnimationEnd =  function ()
+      {
+         popup("Animation end");
+      };
+   }
+   

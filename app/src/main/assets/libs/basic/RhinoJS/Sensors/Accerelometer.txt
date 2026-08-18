@@ -1,0 +1,57 @@
+   var Color = Packages.android.graphics.Color;
+   var Gravity = Packages.android.view.Gravity;
+   var TextView = Packages.android.widget.TextView;
+   var LayoutParams = Packages.android.widget.LinearLayout.LayoutParams;
+   var SensorEventListener = Packages.android.hardware.SensorEventListener;
+   var Context = Packages.android.content.Context;
+   var Sensor = Packages.android.hardware.Sensor;
+   var SensorManager = Packages.android.hardware.SensorManager;
+   var mSensorManager;
+   var mAccelerometer;
+   var color = Color.parseColor("#236846");
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light_DarkActionBar);
+
+    function onCreate()
+   {
+      pkg.Utils.setActionBarBackgroundColor(ctx,color);
+      pkg.Utils.setStatusBarBackgroundColor(ctx,color);
+      pkg.Utils.setNavigationBarBackgroundColor(ctx,color);
+      ctx.setTitle("Accelerometer");
+      textview =  new TextView(ctx);
+      textview.setTextSize(25);
+      textview.setGravity(Gravity.CENTER);
+      ctx.setContentView(textview);
+      mSensorManager = ctx.getSystemService(Context.SENSOR_SERVICE);
+      mAccelerometer = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+   }
+
+    function onResume()
+   {
+      mSensorManager.registerListener(listener,mAccelerometer,SensorManager.SENSOR_DELAY_NORMAL);
+   }
+
+    function onPause()
+   {
+      mSensorManager.unregisterListener(listener);
+   }
+   var listener =  new SensorEventListener()
+   {
+      onAccuracyChanged :  function (sensor,accuracy)
+      {
+         
+      }
+      ,onSensorChanged :  function (event)
+      {
+          if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER)
+         {
+            var txt = "";
+            txt += "x: " + event.values[0]+"\n";
+            txt += "y: " + event.values[1]+"\n";
+            txt += "z: " + event.values[2]+"\n";
+            textview.setText(txt);
+         }
+         
+      }
+      
+   };
+   

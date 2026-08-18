@@ -1,0 +1,31 @@
+   var Canvas = Packages.android.graphics.Canvas;
+   var Paint = Packages.android.graphics.Paint;
+   var Color = Packages.android.graphics.Color;
+   
+   var paint =  new Paint(Paint.ANTI_ALIAS_FLAG);
+   paint.setColor(Color.BLUE);
+   paint.setStyle(Paint.Style.FILL);
+   
+   var paint2 =  new Paint(Paint.ANTI_ALIAS_FLAG);
+   paint2.setColor(Color.GREEN);
+   paint2.setStyle(Paint.Style.STROKE);
+   paint2.setStrokeWidth(5);
+   ctx.setTheme(android.R.style.Theme_DeviceDefault_Light);
+
+    function onCreate()
+   {
+      ctx.setTitle("Canvas Draw");
+      view =  new pkg.views.JASCustomView(ctx);
+      view.setBackgroundColor(Color.WHITE);
+      view.setOnDraw(onDraw);
+      ctx.setContentView(view);
+   }
+
+    function onDraw(canvas)
+   {
+      //Canvas canvas;
+      canvas.drawLine(35,86,600,457,paint2);
+      canvas.drawRect(300,500,450,800,paint);
+      canvas.drawCircle(150,700,100,paint2);
+   }
+   

@@ -1,0 +1,19 @@
+
+var str = "String";
+var str2 = "";
+var num = 1;
+var num2 = 0;
+var undef = undefined;
+var nul = null;
+var arr = [6,3,8];
+var obj = {prop:"value"};
+
+
+print(Boolean(str));
+print(Boolean(str2));
+print(Boolean(num));
+print(Boolean(num2));
+print(Boolean(undef));
+print(Boolean(nul));
+print(Boolean(arr));
+print(Boolean(obj).valueOf());

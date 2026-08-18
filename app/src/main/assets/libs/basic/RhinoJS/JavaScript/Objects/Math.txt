@@ -1,0 +1,8 @@
+// Math object contains static properties and methods to perform math operations
+
+print(Math.PI);
+print(Math.pow(2,3));
+print(Math.sqrt(81));
+
+//See reference
+
