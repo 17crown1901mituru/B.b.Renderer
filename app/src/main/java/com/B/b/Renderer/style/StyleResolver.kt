@@ -122,6 +122,21 @@ class StyleResolver(
         // text-align。ComputedStyle側には既にフィールドがあったが、ここでの解決が漏れていたため
         // ページ側CSSでtext-align:center等を指定しても常にLEFT扱いになっていた(2026-08対応)。
         "text-align" -> style.copy(textAlign = parseTextAlign(decl.value))
+        // text-decoration。2026-08、<a>タグのデフォルト下線対応で追加。shorthand
+        // (text-decoration-line/-style/-color)の完全展開はせず、"underline"トークンの
+        // 有無だけを見る簡易実装(取り消し線・オーバーラインは今回非対応)。
+        "text-decoration" -> style.copy(textDecoration = parseTextDecoration(decl.value))
+        // ---- Flexbox(2026-08対応) ----
+        "flex-direction" -> style.copy(flexDirection = parseFlexDirection(decl.value))
+        "justify-content" -> style.copy(justifyContent = parseJustifyContent(decl.value))
+        "align-items" -> style.copy(alignItems = parseAlignItems(decl.value))
+        // gap。row-gap/column-gapを個別に持たない簡易実装のため("Style.kt"のgapフィールド
+        // 参照)、2値指定("row-gap column-gap")の場合は先頭(row-gap相当)のみを見る。
+        "gap", "row-gap" -> style.copy(gap = parseLength(decl.value.trim().split(Regex("\\s+")).first(), style.fontSize))
+        "flex-grow" -> style.copy(flexGrow = decl.value.trim().toFloatOrNull() ?: style.flexGrow)
+        "flex-shrink" -> style.copy(flexShrink = decl.value.trim().toFloatOrNull() ?: style.flexShrink)
+        "flex-basis" -> style.copy(flexBasis = parseCssValue(decl.value.trim()))
+        "flex" -> parseFlexShorthand(decl.value, style)
         else -> style
     }
 
@@ -283,6 +298,75 @@ class StyleResolver(
         "right" -> TextAlign.RIGHT
         "left" -> TextAlign.LEFT
         else -> TextAlign.LEFT
+    }
+
+    /**
+     * text-decoration専用パーサー。"underline"トークンの有無だけを見る(2026-08対応)。
+     * "none"や未対応値(line-through/overline等)はNONEへフォールバックする——
+     * text-alignと同じく、パース不能値は規定値に戻す方が安全側のため。
+     */
+    private fun parseTextDecoration(value: String): TextDecoration =
+        if (value.trim().split(Regex("\\s+")).any { it.equals("underline", ignoreCase = true) }) {
+            TextDecoration.UNDERLINE
+        } else {
+            TextDecoration.NONE
+        }
+
+    /**
+     * flex-direction。row-reverse/column-reverseは「逆順配置」までは対応しておらず、
+     * 単にrow/columnと同じ扱いにフォールバックする(2026-08、Flexbox初期実装のスコープ外。
+     * LayoutEngine.layoutFlexRow/Column参照)。
+     */
+    private fun parseFlexDirection(value: String): FlexDirection = when (value.trim()) {
+        "column", "column-reverse" -> FlexDirection.COLUMN
+        else -> FlexDirection.ROW
+    }
+
+    private fun parseJustifyContent(value: String): JustifyContent = when (value.trim()) {
+        "center" -> JustifyContent.CENTER
+        "flex-end", "end" -> JustifyContent.FLEX_END
+        "space-between" -> JustifyContent.SPACE_BETWEEN
+        "space-around" -> JustifyContent.SPACE_AROUND
+        else -> JustifyContent.FLEX_START
+    }
+
+    private fun parseAlignItems(value: String): AlignItems = when (value.trim()) {
+        "center" -> AlignItems.CENTER
+        "flex-end", "end" -> AlignItems.FLEX_END
+        "flex-start", "start" -> AlignItems.FLEX_START
+        else -> AlignItems.STRETCH
+    }
+
+    /**
+     * flex shorthand。CSS仕様の主要パターンを実用範囲でカバーする簡易パーサー:
+     *   none          -> grow:0 shrink:0 basis:auto(伸縮しない、自身の指定サイズのまま)
+     *   auto          -> grow:1 shrink:1 basis:auto
+     *   initial       -> grow:0 shrink:1 basis:auto(CSS初期値。実質「伸びないが縮む」)
+     *   <number>      -> grow:<number> shrink:1 basis:0(最頻出パターン。`flex:1`等)
+     *   <number> <number> [<basis>] -> grow shrink basis(3値指定)
+     * 上記いずれにも一致しない値は無視し、現在のstyleをそのまま返す(安全側)。
+     */
+    private fun parseFlexShorthand(value: String, style: ComputedStyle): ComputedStyle {
+        val trimmed = value.trim()
+        when (trimmed) {
+            "none" -> return style.copy(flexGrow = 0f, flexShrink = 0f, flexBasis = CssValue.Auto)
+            "auto" -> return style.copy(flexGrow = 1f, flexShrink = 1f, flexBasis = CssValue.Auto)
+            "initial" -> return style.copy(flexGrow = 0f, flexShrink = 1f, flexBasis = CssValue.Auto)
+        }
+
+        val tokens = trimmed.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return style
+
+        val numbers = tokens.mapNotNull { it.toFloatOrNull() }
+        val basisToken = tokens.firstOrNull { it.toFloatOrNull() == null }
+        if (numbers.isEmpty() && basisToken == null) return style // パース不能、変更なし
+
+        val grow = numbers.getOrNull(0) ?: 1f
+        val shrink = numbers.getOrNull(1) ?: 1f
+        // 数値のみ(basisToken無し)の場合、CSS仕様通りbasis:0%(=growだけで幅を決める
+        // 最頻出パターン)にする。basisTokenがある場合はそれを解決する。
+        val basis = basisToken?.let { parseCssValue(it) } ?: CssValue.Px(0f)
+        return style.copy(flexGrow = grow, flexShrink = shrink, flexBasis = basis)
     }
 
     private fun parseDisplay(value: String): Display = when (value.trim()) {

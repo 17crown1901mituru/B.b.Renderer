@@ -21,6 +21,7 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
     private var layoutEngine: LayoutEngine? = null
     private val zoomGesture = ZoomGestureHelper(context) { layoutEngine }
     override var onHtmxTrigger: ((Element) -> Unit)? = null
+    override var onNavigate: ((String) -> Unit)? = null
 
     init {
         setEGLContextClientVersion(3)
@@ -64,7 +65,11 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
                     com.B.b.Renderer.debug.BehaviorAuditLog.Category.NATIVE_TAP,
                     "<${target.tag}${target.attributes["id"]?.let { " id=$it" } ?: ""}>",
                 )
-                dispatchClick(target) { hxNode -> onHtmxTrigger?.invoke(hxNode) }
+                dispatchClick(
+                    target,
+                    onHtmxTrigger = { hxNode -> onHtmxTrigger?.invoke(hxNode) },
+                    onNavigate = { url -> onNavigate?.invoke(url) },
+                )
             },
             requestRedraw = { requestRender() },
         )
@@ -73,7 +78,13 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
             hostView = this,
             rootProvider = { engine.root },
             scrollYProvider = { engine.scrollY },
-            onActivate = { target -> dispatchClick(target) { hxNode -> onHtmxTrigger?.invoke(hxNode) } },
+            onActivate = { target ->
+                dispatchClick(
+                    target,
+                    onHtmxTrigger = { hxNode -> onHtmxTrigger?.invoke(hxNode) },
+                    onNavigate = { url -> onNavigate?.invoke(url) },
+                )
+            },
         )
         requestLayoutPass()
     }

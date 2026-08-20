@@ -22,6 +22,15 @@ import com.B.b.Renderer.style.TextAlign
  * 超えて描画自体が消える事故につながった)。`android.text.StaticLayout`
  * (Android SDK標準。Unicode基準の改行位置判定を内蔵)に置き換え、実際に複数行へ
  * 折り返した上でラスタライズするようにした。
+ *
+ * 2026-08、<a>タグのインラインフロー対応にあわせ、プレーンテキストのみを受け取る
+ * getOrCreate(text: String, ...)は廃止し、android.text.Spanned(SpannableStringBuilder)を
+ * 受け取るgetOrCreateSpanned()に一本化した。<a>等のdisplay:inline要素が周囲のテキストと
+ * 混ざって折り返される(LayoutEngine.layoutInlineRun参照)場合、色や下線が単語ごとに
+ * 異なり得るため、1つのStaticLayoutで色・下線混在のテキストを描画する必要がある——
+ * ForegroundColorSpan/UnderlineSpanで範囲ごとに指定できるSpanned前提の実装にすることで、
+ * 「単一色のテキスト」も「色混在のテキスト」も同じ経路で扱える(GLEngineRenderer.
+ * buildInlineSpanned()が呼び出し側で組み立てる)。
  */
 class TextTextureCache {
 
@@ -40,27 +49,33 @@ class TextTextureCache {
     private val rebuildPageThreshold = 4
 
     /**
+     * @param spanned 描画するテキスト。ForegroundColorSpan/UnderlineSpan等で
+     *   範囲ごとに色・下線を指定済みのもの(GLEngineRenderer.buildInlineSpanned()参照)。
+     * @param contentKey スパン情報まで含めたキャッシュ鍵の材料(プレーンな文字列だけでは
+     *   スパンの変化を検知できないため、呼び出し側で色・下線等を織り込んだ文字列を渡すこと)。
+     * @param fontSizePx 基準フォントサイズ。AbsoluteSizeSpanで個別に上書きされていない
+     *   範囲に適用される。
      * @param maxWidthPx 折り返しの基準になる、要素のコンテンツボックス幅(px)。
      *   text-alignがcenter/rightの場合、行ごとの配置がこの幅を基準に計算されるため、
      *   ラスタライズ後のBitmapの意味も変わる(下記rasterize()参照)。
      */
-    fun getOrCreate(
+    fun getOrCreateSpanned(
         seq: Long,
-        text: String,
+        spanned: CharSequence,
+        contentKey: String,
         fontSizePx: Float,
-        colorArgb: Int,
         maxWidthPx: Int,
         textAlign: TextAlign,
     ): Entry? {
-        if (text.isBlank()) return null
+        if (spanned.isBlank()) return null
         val safeMaxWidth = maxWidthPx.coerceAtLeast(1)
-        val contentHash = "$text|$fontSizePx|$colorArgb|$safeMaxWidth|$textAlign".hashCode()
+        val contentHash = "$contentKey|$fontSizePx|$safeMaxWidth|$textAlign".hashCode()
 
         cache[seq]?.let { existing ->
             if (existing.contentHash == contentHash) return existing
         }
 
-        val bitmap = rasterize(text, fontSizePx, colorArgb, safeMaxWidth, textAlign)
+        val bitmap = rasterize(spanned, fontSizePx, safeMaxWidth, textAlign)
         val entry = allocateAndUpload(seq, bitmap, contentHash)
         bitmap.recycle()
         return entry
@@ -73,17 +88,18 @@ class TextTextureCache {
      * ズレてしまう)。leftは単に各行を左詰めで描くだけなので、実際に使われた最大行幅まで
      * 切り詰めてアトラスの消費を抑える。
      */
-    private fun rasterize(text: String, fontSizePx: Float, colorArgb: Int, maxWidthPx: Int, textAlign: TextAlign): Bitmap {
+    private fun rasterize(spanned: CharSequence, fontSizePx: Float, maxWidthPx: Int, textAlign: TextAlign): Bitmap {
+        // 基準Paint。色・下線は各Span側で範囲指定されるため、ここでは既定色(黒)・
+        // 下線無しのままでよい(Spanが無い範囲があった場合の保険的なフォールバック)。
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = fontSizePx
-            color = colorArgb
         }
         val alignment = when (textAlign) {
             TextAlign.CENTER -> Layout.Alignment.ALIGN_CENTER
             TextAlign.RIGHT -> Layout.Alignment.ALIGN_OPPOSITE
             TextAlign.LEFT -> Layout.Alignment.ALIGN_NORMAL
         }
-        val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, maxWidthPx)
+        val layout = StaticLayout.Builder.obtain(spanned, 0, spanned.length, paint, maxWidthPx)
             .setAlignment(alignment)
             .setIncludePad(false)
             .build()

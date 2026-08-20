@@ -4,16 +4,24 @@ import android.content.Context
 import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.ForegroundColorSpan
+import android.text.style.UnderlineSpan
 import com.B.b.Renderer.benchmark.RenderTierBenchmark
 import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.core.ImageElement
 import com.B.b.Renderer.core.ImageLoadState
+import com.B.b.Renderer.core.InlineRunLayout
 import com.B.b.Renderer.core.MediaElement
 import com.B.b.Renderer.core.TextNode
 import com.B.b.Renderer.input.resolvePaintOrder
 import com.B.b.Renderer.layout.LayoutEngine
 import com.B.b.Renderer.media.JsMediaElement
+import com.B.b.Renderer.style.ComputedStyle
 import com.B.b.Renderer.style.Display
+import com.B.b.Renderer.style.TextDecoration
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
@@ -140,7 +148,13 @@ class GLEngineRenderer(
         }
 
         quadRenderer.beginFrame(maxQuads = paintOrder.size + 8)
-        val textDraws = mutableListOf<Pair<Element, TextTextureCache.Entry>>()
+        // 2026-08、<a>タグのインラインフロー対応。以前は(Element, Entry)のペアで
+        // 「描画位置はelement.computedRect+padding」という前提だったが、1つのコンテナに
+        // 複数のinline run(テキストとリンクが混在した折り返し塊)が乗るようになったため、
+        // 描画位置(drawX, drawY)をrun側の原点からそのまま持ち回る形に変更した
+        // (LayoutEngine.InlineRunLayoutのoriginX/originYは、コンテナのpadding込みで
+        // 既に確定した「1行目の描画開始位置」なので、ここでpaddingを重ねて足す必要はない)。
+        val textDraws = mutableListOf<Triple<Float, Float, TextTextureCache.Entry>>()
         val videoDraws = mutableListOf<Pair<Element, Int>>() // element, oesTextureId
         val imageDraws = mutableListOf<Pair<Element, Int>>() // element, 2Dテクスチャid
 
@@ -193,27 +207,31 @@ class GLEngineRenderer(
                 return@forEach
             }
 
-            val text = element.children.filterIsInstance<TextNode>()
-                .joinToString(" ") { it.data.trim() }
-                .trim()
-            if (text.isNotEmpty()) {
-                val colorArgb = android.graphics.Color.argb(
-                    style.color.a, style.color.r, style.color.g, style.color.b,
-                )
-                // 折り返しの基準幅はコンテンツボックス幅(padding内側)。2026-08対応、
-                // 詳細はTextTextureCache.kt冒頭のコメント参照。
-                val maxWidthPx = (rect.width - style.padding.left.toInt() - style.padding.right.toInt())
-                    .coerceAtLeast(1)
-                val entry = textTextureCache.getOrCreate(
-                    seq = element.seq,
-                    text = text,
-                    fontSizePx = style.fontSize,
-                    colorArgb = colorArgb,
-                    maxWidthPx = maxWidthPx,
-                    textAlign = style.textAlign,
-                )
-                if (entry != null) {
-                    textDraws.add(element to entry)
+            // 2026-08、<a>タグのインラインフロー対応。以前は`element.children`直下の
+            // TextNodeだけを抜き出して1テクスチャにまとめていたが、これだと<a>等の
+            // display:inline要素が混在する段落でリンクのテキストだけが別Elementとして
+            // 分離してしまい、正しく同じ行に混ぜて描画できなかった(<a>だけ別行にズレる、
+            // 文中リンクなのにコンテナ全幅を占有する等)。今はLayoutEngineが検出した
+            // inlineRun単位(テキストとインライン要素が混ざった1つの折り返し塊)ごとに、
+            // SpannableStringBuilderで色・下線をスパンとして埋め込み、StaticLayoutへ
+            // まとめて渡すことで、実ブラウザ同様「文中リンク」を1つの折り返しとして
+            // 描画できるようにしている(詳細はbuildInlineSpanned()、
+            // core/Element.ktのInlineRunLayoutコメント参照)。
+            element.inlineRuns.forEach { run ->
+                val (spanned, contentKey) = buildInlineSpanned(run, style)
+                if (spanned.isNotBlank()) {
+                    val maxWidthPx = run.maxWidth.toInt().coerceAtLeast(1)
+                    val entry = textTextureCache.getOrCreateSpanned(
+                        seq = run.nodes.first().seq,
+                        spanned = spanned,
+                        contentKey = contentKey,
+                        fontSizePx = style.fontSize,
+                        maxWidthPx = maxWidthPx,
+                        textAlign = style.textAlign,
+                    )
+                    if (entry != null) {
+                        textDraws.add(Triple(run.originX, run.originY, entry))
+                    }
                 }
             }
         }
@@ -248,17 +266,16 @@ class GLEngineRenderer(
 
         // ページ(通常1〜数枚)ごとにグルーピングし、ページにつき1 drawCallでまとめて描画する。
         // 以前は「テキスト要素数」だけdrawCallが出ていたが、これで「アトラスページ数」に減る。
-        textDraws.groupBy { it.second.atlasPageIndex }.forEach { (pageIndex, drawsInPage) ->
+        textDraws.groupBy { it.third.atlasPageIndex }.forEach { (pageIndex, drawsInPage) ->
             atlasQuadRenderer.beginBatch(maxQuads = drawsInPage.size)
-            drawsInPage.forEach { (element, entry) ->
-                val rect = element.computedRect
-                val style = element.computedStyle
-                // 2026-08、text-alignはStaticLayoutによるラスタライズ側(TextTextureCache)で
-                // 行ごとに正しく計算済みなので、ここでは常にコンテンツボックスの左端に
-                // そのまま置くだけでよい(以前のresolveTextDrawX()は不要になったため削除した)。
+            drawsInPage.forEach { (drawX, drawY, entry) ->
+                // 2026-08、<a>タグのインラインフロー対応。drawX/drawYはInlineRunLayout.
+                // originX/originY(コンテナのpadding込みで既に確定した描画開始位置)を
+                // そのまま使うため、以前のようにrect.x/y+padding.left/topを重ねて
+                // 足す必要はない(むしろ足すと二重にpaddingがかかってズレる)。
                 atlasQuadRenderer.addQuad(
-                    x = rect.x.toFloat() + style.padding.left,
-                    y = rect.y.toFloat() + style.padding.top,
+                    x = drawX,
+                    y = drawY,
                     width = entry.width.toFloat(),
                     height = entry.height.toFloat(),
                     region = entry.region,
@@ -311,6 +328,81 @@ class GLEngineRenderer(
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
         bitmap.recycle()
         return textureId
+    }
+
+    /**
+     * 1つのinline run(LayoutEngine.layoutBlockChildren()が検出した、TextNode/
+     * display:inline要素が連続する折り返し塊)を、色・下線をスパンとして埋め込んだ
+     * SpannableStringBuilderへ変換する(2026-08、<a>タグのインラインフロー対応)。
+     *
+     * 各セグメント(TextNode、またはdisplay:inline要素)の文字範囲へ、それぞれの
+     * ForegroundColorSpan(色)・UnderlineSpan(text-decoration:underline)・
+     * AbsoluteSizeSpan(コンテナと異なるfont-sizeの場合のみ)を個別に設定する
+     * ("重ならない"よう、TextNode部分にもコンテナ自身の色を明示的にスパン化している。
+     * 全体に基調色を敷いてから範囲だけ上書きする方式だと、Android側のスパン適用順序
+     * (getSpans()の返す順序)に結果が依存してしまい不安定なため、全文字が必ずどれか
+     * 1つのForegroundColorSpanで覆われるようにして曖昧さを無くしてある)。
+     *
+     * 戻り値のcontentKeyは、TextTextureCache側のキャッシュ判定に使う文字列
+     * (プレーンテキストだけでなく色・下線・fontSize等スパンの内容まで含める必要がある。
+     * SpannableStringBuilder自体はdata classではなくキャッシュ鍵として使えないため)。
+     *
+     * 既知の制約: このセグメント化はrun.nodes(DOM順そのまま)を単語区切りなしで
+     * そのまま連結するため、LayoutEngine.layoutInlineRun()の単語単位greedy折り返しの
+     * 結果とは折り返し位置が微妙にズレ得る(両者とも同じテキスト・同じ幅を渡しては
+     * いるが、前者はStaticLayoutの内部アルゴリズム、後者はPaint.measureTextの単語単位
+     * 積み上げという別アルゴリズムのため。既存のテキスト折り返し全般に共通する
+     * 「ほぼ一致するが完全一致は保証しない」という制約の延長)。
+     */
+    private fun buildInlineSpanned(run: InlineRunLayout, containerStyle: ComputedStyle): Pair<SpannableStringBuilder, String> {
+        val sb = SpannableStringBuilder()
+        val keyParts = StringBuilder()
+        val containerColorArgb = android.graphics.Color.argb(
+            containerStyle.color.a, containerStyle.color.r, containerStyle.color.g, containerStyle.color.b,
+        )
+
+        run.nodes.forEachIndexed { index, node ->
+            if (index > 0) sb.append(' ')
+            when (node) {
+                is TextNode -> {
+                    val text = node.data.trim()
+                    val start = sb.length
+                    sb.append(text)
+                    val end = sb.length
+                    if (end > start) {
+                        sb.setSpan(ForegroundColorSpan(containerColorArgb), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        if (containerStyle.textDecoration == TextDecoration.UNDERLINE) {
+                            sb.setSpan(UnderlineSpan(), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        }
+                    }
+                    keyParts.append("T:").append(text).append(':').append(containerColorArgb).append('|')
+                }
+                is Element -> {
+                    val text = node.children.filterIsInstance<TextNode>()
+                        .joinToString(" ") { it.data.trim() }.trim()
+                    val start = sb.length
+                    sb.append(text)
+                    val end = sb.length
+                    val elStyle = node.computedStyle
+                    val elColorArgb = android.graphics.Color.argb(
+                        elStyle.color.a, elStyle.color.r, elStyle.color.g, elStyle.color.b,
+                    )
+                    if (end > start) {
+                        sb.setSpan(ForegroundColorSpan(elColorArgb), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        if (elStyle.textDecoration == TextDecoration.UNDERLINE) {
+                            sb.setSpan(UnderlineSpan(), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        }
+                        if (elStyle.fontSize != containerStyle.fontSize) {
+                            sb.setSpan(AbsoluteSizeSpan(elStyle.fontSize.toInt()), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        }
+                    }
+                    keyParts.append("E:").append(text).append(':').append(elColorArgb).append(':')
+                        .append(elStyle.textDecoration).append(':').append(elStyle.fontSize).append('|')
+                }
+                else -> {}
+            }
+        }
+        return sb to keyParts.toString()
     }
 
     /**

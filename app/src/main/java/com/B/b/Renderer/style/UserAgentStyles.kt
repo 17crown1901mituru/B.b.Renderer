@@ -17,10 +17,15 @@ package com.B.b.Renderer.style
  * ブラウザ実装によって多少の差はあるが、視覚的階層を再現する目的としては十分。
  *
  * 制約: StyleResolverが現状対応するCSSプロパティ(color/background-color/
- * font-size/display/position/width/height/z-index/pointer-events/margin系)の
- * 範囲内でのみ既定値を持たせている。font-weight(太字)はComputedStyleに
- * フィールドはあるがStyleResolverが未対応のため、ここでは扱えない
- * (今後対応を追加する際、あわせてこのファイルにも既定値を足すこと)。
+ * font-size/display/position/width/height/z-index/pointer-events/margin系/
+ * text-align/text-decoration)の範囲内でのみ既定値を持たせている。
+ * font-weight(太字)はComputedStyleにフィールドはあるがStyleResolverが未対応のため、
+ * ここでは扱えない(今後対応を追加する際、あわせてこのファイルにも既定値を足すこと)。
+ *
+ * 2026-08追記: <a>タグのタップ遷移(navigate)対応にあわせ、実ブラウザの既定表現
+ * (青字+下線)をtext-decoration: underline で再現。href解決・実際のタップ判定/遷移は
+ * StyleResolver/UserAgentStylesの範囲外(InputHandling.dispatchClick→
+ * EngineHostView.onNavigate→EngineActivity.navigateForegroundTo)で行う。
  *
  * paddingはComputedStyle/LayoutEngine/GLEngineRendererが既に参照しているにも
  *関わらず、StyleResolverがpaddingプロパティを一切解決していない(marginと
@@ -44,7 +49,7 @@ object UserAgentStyles {
         body { font-size: 16px; margin: 8px; }
         div { font-size: 16px; }
         small { font-size: 13px; }
-        a { color: #0000EE; }
+        a { color: #0000EE; text-decoration: underline; }
     """
 
     /**

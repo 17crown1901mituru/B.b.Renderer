@@ -25,6 +25,7 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
     private var touchController: TouchInputController? = null
     private val zoomGesture = ZoomGestureHelper(context) { layoutEngine }
     override var onHtmxTrigger: ((Element) -> Unit)? = null
+    override var onNavigate: ((String) -> Unit)? = null
 
     override fun attach(engine: LayoutEngine) {
         layoutEngine = engine
@@ -38,7 +39,11 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
                     com.B.b.Renderer.debug.BehaviorAuditLog.Category.NATIVE_TAP,
                     "<${target.tag}${target.attributes["id"]?.let { " id=$it" } ?: ""}>",
                 )
-                dispatchClick(target) { hxNode -> onHtmxTrigger?.invoke(hxNode) }
+                dispatchClick(
+                    target,
+                    onHtmxTrigger = { hxNode -> onHtmxTrigger?.invoke(hxNode) },
+                    onNavigate = { url -> onNavigate?.invoke(url) },
+                )
             },
             requestRedraw = { postInvalidate() },
         )
@@ -47,7 +52,13 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
             hostView = this,
             rootProvider = { layoutEngine?.root },
             scrollYProvider = { layoutEngine?.scrollY ?: 0f },
-            onActivate = { target -> dispatchClick(target) { hxNode -> onHtmxTrigger?.invoke(hxNode) } },
+            onActivate = { target ->
+                dispatchClick(
+                    target,
+                    onHtmxTrigger = { hxNode -> onHtmxTrigger?.invoke(hxNode) },
+                    onNavigate = { url -> onNavigate?.invoke(url) },
+                )
+            },
         )
         requestLayoutPass()
     }

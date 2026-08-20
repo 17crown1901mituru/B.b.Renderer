@@ -378,6 +378,14 @@ class EngineActivity : AppCompatActivity() {
     private fun applyForeground(session: TabSession) {
         engineHost.attach(session.layoutEngine)
         engineHost.onHtmxTrigger = session.onHtmxTrigger
+        // 2026-08、<a>タグのタップ遷移対応。EngineHostView(GLEngineView/EngineView)側は
+        // 「どのhrefがタップされたか」しか知らないため、相対URL解決(resolveUrl、baseUrlは
+        // このタブの現在のページURL)と実際のタブ内遷移(navigateForegroundTo、履歴記録・
+        // WakeLock解放等を含む一連の処理)はここでまとめて行う。session.urlをクロージャで
+        // 捕捉しているため、このタブが別ページへ遷移してapplyForeground()が再度呼ばれれば
+        // (=このラムダごと新しいsession.urlの値で差し替えられるため)、常にそのタブの
+        // 「今開いているページ」を基準にhrefが解決される。
+        engineHost.onNavigate = { href -> navigateForegroundTo(resolveUrl(session.url, href)) }
         currentPageUrl = session.url
         engineFrame.addressBarView.setUrl(session.url)
         recordHistoryVisit(session.url, session.title)

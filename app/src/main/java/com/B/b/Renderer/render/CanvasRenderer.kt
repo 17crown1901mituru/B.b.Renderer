@@ -50,6 +50,9 @@ class CanvasRenderer {
                 style.color.a, style.color.r, style.color.g, style.color.b,
             )
             textPaint.textSize = style.fontSize
+            // 2026-08、<a>タグのデフォルト下線対応。GLEngineRenderer側(StaticLayout+
+            // TextPaint.isUnderlineText)と同じPaint標準機能で揃える。
+            textPaint.isUnderlineText = style.textDecoration == com.B.b.Renderer.style.TextDecoration.UNDERLINE
             canvas.drawText(
                 text,
                 rect.x.toFloat() + style.padding.left,

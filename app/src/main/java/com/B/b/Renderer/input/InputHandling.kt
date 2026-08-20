@@ -28,11 +28,29 @@ private fun collectInPaintOrder(node: Element, output: MutableList<Element>) {
 fun hitTest(root: Element, x: Float, y: Float): Element? {
     val paintList = resolvePaintOrder(root)
     for (node in paintList.asReversed()) {
-        if (node.computedRect.contains(x, y) && isHitTestable(node)) {
+        if (isHitTestable(node) && elementContainsPoint(node, x, y)) {
             return node
         }
     }
     return null
+}
+
+/**
+ * 2026-08、<a>タグのインラインフロー対応。display:inline要素(<a>等)がテキストと
+ * 混在して折り返された場合、computedRectは「その要素の単語が乗った全ての行の
+ * 外接矩形」に過ぎず、複数行にまたがる要素だと矩形内に無関係な空白領域を含み得る
+ * (1行目の右端付近と2行目の左端付近だけがその要素のものだと、外接矩形は
+ * 1〜2行目の間を全部覆ってしまい、実際には文字の無い場所までタップ判定に
+ * 含まれてしまう)。LayoutEngineが行ごとに算出したinlineFragments(その要素の単語が
+ * 実際に占める行単位の矩形群、core/Element.kt参照)があればそちらを優先して
+ * ヒットテストする。無ければ(=ブロック要素等、インラインフローに参加しなかった要素)
+ * 従来通りcomputedRect全体を使う。
+ */
+private fun elementContainsPoint(node: Element, x: Float, y: Float): Boolean {
+    if (node.inlineFragments.isNotEmpty()) {
+        return node.inlineFragments.any { it.contains(x, y) }
+    }
+    return node.computedRect.contains(x, y)
 }
 
 private fun isHitTestable(node: Element): Boolean {
@@ -156,21 +174,45 @@ fun markVisualDirty(node: Element) {
     node.markDirty(DirtyLevel.STYLE)
 }
 
-/** クリックイベントのバブリング。hx-*要素に到達したらそこで伝播を止める */
-fun dispatchClick(target: Element, onHtmxTrigger: (Element) -> Unit) {
+/**
+ * クリックイベントのバブリング。hx-*要素に到達したらそこで伝播を止める。
+ *
+ * 2026-08、<a>タグのnavigate対応にあわせてリファクタ。以前はcurrentノードを
+ * 辿るたびに毎回新しいEvent("click", target)を生成しており、あるノードのリスナーが
+ * preventDefault()を呼んでも、親ノードのリスナー呼び出し時に生成される次のEvent
+ * インスタンスには一切伝わらなかった(DOM仕様上、同一クリックのバブリング全体では
+ * 単一のEventオブジェクトを使い回すべきで、これは既存のバグだった)。
+ * ここでは1回のdispatchClick呼び出しにつきEventを1つだけ生成し、バブリング中の
+ * どのリスナーがpreventDefault()を呼んでもそれ以降の判定に反映されるようにした。
+ *
+ * <a href>要素(またはその子孫)をタップした場合、そのhrefをonNavigateへ渡す
+ * (実際のURL解決・タブ内遷移はEngineActivity側の責務。ここでは
+ * 「どのURLへ行きたいか」を伝えるだけに留める)。ただし以下のいずれかならnavigateしない:
+ *   - バブリング中にstopPropagation()が呼ばれた(その時点で走査自体を打ち切る)
+ *   - 途中でhx-post/hx-get要素に到達した(HTMXが処理を引き継ぐため、実ナビゲーションはしない。
+ *     `<a href="..." hx-get="...">`のようなHTMXの一般的なフォールバックパターンを想定した挙動)
+ *   - いずれかのリスナーがpreventDefault()を呼んだ(標準的なDOM挙動の再現)
+ */
+fun dispatchClick(target: Element, onHtmxTrigger: (Element) -> Unit, onNavigate: ((String) -> Unit)? = null) {
+    val event = com.B.b.Renderer.core.Event("click", target)
+    var anchorHref: String? = null
     var current: Element? = target
     while (current != null) {
-        // NOTE: eventListenersはEvent.kt導入時にEventListener((Event)->Unit)へ移行済み。
-        // ここでは(target)ではなくEvent(type="click", target=target)を渡す(旧実装はElementを
-        // そのまま渡していて型不一致でビルドが通らなかったため修正)。
-        current.eventListeners["click"]?.toList()?.forEach { handler ->
-            handler.invoke(com.B.b.Renderer.core.Event("click", target))
+        current.eventListeners["click"]?.toList()?.forEach { handler -> handler.invoke(event) }
+        if (event.propagationStopped) break
+
+        if (anchorHref == null && current.tag == "a") {
+            current.attributes["href"]?.takeIf { it.isNotBlank() }?.let { anchorHref = it }
         }
 
         if (current.attributes.containsKey("hx-post") || current.attributes.containsKey("hx-get")) {
             onHtmxTrigger(current)
-            break
+            return
         }
         current = current.parent
+    }
+
+    if (anchorHref != null && !event.defaultPrevented) {
+        onNavigate?.invoke(anchorHref!!)
     }
 }

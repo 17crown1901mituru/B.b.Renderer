@@ -12,4 +12,10 @@ interface EngineHostView {
     fun attach(engine: LayoutEngine)
     fun requestLayoutPass()
     var onHtmxTrigger: ((Element) -> Unit)?
+
+    // 2026-08、<a>タグのタップ遷移対応。「どのhrefへ行きたいか」を伝えるだけで、
+    // 相対URL解決・実際のタブ内遷移(TabManager経由)はEngineActivity側の責務とする
+    // (onHtmxTriggerと同じ役割分担: Viewはユーザー操作の検知とDOM上の意味付けまで、
+    // ナビゲーションの実行は常にActivity)。
+    var onNavigate: ((String) -> Unit)?
 }

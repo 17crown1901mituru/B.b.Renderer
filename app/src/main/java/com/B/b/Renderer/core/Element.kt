@@ -13,6 +13,21 @@ open class Element(
 
     var computedStyle: ComputedStyle = ComputedStyle()
     var computedRect: LayoutRect = LayoutRect(0, 0, 0, 0)
+    // 2026-08、インラインフロー対応(LayoutEngine.layoutInlineRun()参照)。
+    // <a>等、テキストと混在して折り返された(display:inline)要素の場合、computedRectは
+    // 「その要素の単語が乗った全ての行の外接矩形」に過ぎず、複数行にまたがる要素だと
+    // 矩形内に無関係な空白領域を含み得る(例: 1行目の右端付近の単語と2行目の左端付近の
+    // 単語だけがその要素のものだと、外接矩形は1〜2行目の間を全部覆ってしまう)。
+    // ヒットテスト用に、行ごとの実際の占有矩形をこちらに別途持たせる
+    // (InputHandling.hitTest()参照)。インラインフローに参加しない通常のブロック要素では
+    // 空リストのままで、その場合はcomputedRectがそのまま正確なヒット領域になる。
+    var inlineFragments: List<LayoutRect> = emptyList()
+    // 2026-08、インラインフロー対応。このElementを"コンテナ"として直接の子(TextNode/
+    // display:inline要素)から検出された折り返し塊(inline run)の一覧。GLEngineRendererが
+    // 実際の描画(SpannableStringBuilder化・StaticLayoutでの再折り返し・GPUテクスチャ化)に
+    // 使う。ブロック子要素だけを持つ・子要素を持たない等、インライン内容が無い要素では
+    // 空リストのまま。
+    var inlineRuns: List<InlineRunLayout> = emptyList()
     var stackingContext: StackingContext? = null
     var priorityHint: RenderPriority = RenderPriority.VISIBLE
     var elementState: ElementState = ElementState()
@@ -191,3 +206,30 @@ data class LayoutRect(val x: Int, val y: Int, val width: Int, val height: Int) {
 
     fun center(): Pair<Int, Int> = (x + width / 2) to (y + height / 2)
 }
+
+/**
+ * 2026-08、インラインフロー対応。1つの折り返し塊(TextNode/display:inline要素が
+ * 混在した連続列)の位置情報。LayoutEngine.layoutBlock()が、コンテナ要素の子を
+ * 走査中に「TextNodeまたはdisplay:inline要素が連続する区間」を1つの塊として検出する
+ * たびに1つ生成し、コンテナElement.inlineRunsへ積む(詳細はLayoutEngine.layoutInlineRun()
+ * のコメント参照)。
+ *
+ *   originX/originY: この塊の1行目の描画開始位置(コンテナのpadding込み、物理px)。
+ *     StaticLayoutは常に(0,0)起点でレイアウトするため、GLEngineRenderer側は
+ *     ラスタライズ後のBitmapをこの座標へオフセットして描画するだけでよい。
+ *   maxWidth: 折り返しの基準幅(物理px)。LayoutEngine側の見積もり(Paint.measureTextに
+ *     よる単語単位のgreedy折り返し)と、GLEngineRenderer側の実際のラスタライズ
+ *     (StaticLayoutによる折り返し)の両方に同じ値を渡すことで、二つの結果が
+ *     ほぼ一致するようにしている(完全一致を保証するものではない、既存のテキスト
+ *     折り返し全般に共通する制約)。
+ *   nodes: この塊を構成するNode列(TextNode、またはdisplay:inline要素)。DOM順のまま
+ *     保持し、GLEngineRenderer側で改めてSpannableStringBuilderへ変換する
+ *     (各ノードの現在のcomputedStyleを毎フレーム読み直すため、色・下線等の
+ *     見た目だけの変更(DirtyLevel.STYLE)がlayoutBlock再実行なしでも反映される)。
+ */
+data class InlineRunLayout(
+    val originX: Float,
+    val originY: Float,
+    val maxWidth: Float,
+    val nodes: List<Node>,
+)
