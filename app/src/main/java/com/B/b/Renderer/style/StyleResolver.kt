@@ -96,29 +96,29 @@ class StyleResolver(
             val parsed = parseMarginShorthand(decl.value, style.margin, style.marginLeftAuto, style.marginRightAuto, style.fontSize)
             style.copy(margin = parsed.edges, marginLeftAuto = parsed.leftAuto, marginRightAuto = parsed.rightAuto)
         }
-        "margin-top" -> style.copy(margin = style.margin.copy(top = parseLength(decl.value, style.fontSize)))
+        "margin-top" -> style.copy(margin = style.margin.copy(top = parseLengthOrPercent(decl.value, style.fontSize)))
         "margin-right" -> {
             val auto = decl.value.trim().equals("auto", ignoreCase = true)
             style.copy(
-                margin = style.margin.copy(right = if (auto) 0f else parseLength(decl.value, style.fontSize)),
+                margin = style.margin.copy(right = if (auto) CssValue.Px(0f) else parseLengthOrPercent(decl.value, style.fontSize)),
                 marginRightAuto = auto,
             )
         }
-        "margin-bottom" -> style.copy(margin = style.margin.copy(bottom = parseLength(decl.value, style.fontSize)))
+        "margin-bottom" -> style.copy(margin = style.margin.copy(bottom = parseLengthOrPercent(decl.value, style.fontSize)))
         "margin-left" -> {
             val auto = decl.value.trim().equals("auto", ignoreCase = true)
             style.copy(
-                margin = style.margin.copy(left = if (auto) 0f else parseLength(decl.value, style.fontSize)),
+                margin = style.margin.copy(left = if (auto) CssValue.Px(0f) else parseLengthOrPercent(decl.value, style.fontSize)),
                 marginLeftAuto = auto,
             )
         }
-        // padding。marginと同じ長さパーサー(parseLength: px/em/rem対応)・shorthand展開
+        // padding。marginと同じ長さ/百分率パーサー(parseLengthOrPercent)・shorthand展開
         // パターンを流用する。
         "padding" -> style.copy(padding = parseBoxEdgesShorthand(decl.value, style.padding, style.fontSize))
-        "padding-top" -> style.copy(padding = style.padding.copy(top = parseLength(decl.value, style.fontSize)))
-        "padding-right" -> style.copy(padding = style.padding.copy(right = parseLength(decl.value, style.fontSize)))
-        "padding-bottom" -> style.copy(padding = style.padding.copy(bottom = parseLength(decl.value, style.fontSize)))
-        "padding-left" -> style.copy(padding = style.padding.copy(left = parseLength(decl.value, style.fontSize)))
+        "padding-top" -> style.copy(padding = style.padding.copy(top = parseLengthOrPercent(decl.value, style.fontSize)))
+        "padding-right" -> style.copy(padding = style.padding.copy(right = parseLengthOrPercent(decl.value, style.fontSize)))
+        "padding-bottom" -> style.copy(padding = style.padding.copy(bottom = parseLengthOrPercent(decl.value, style.fontSize)))
+        "padding-left" -> style.copy(padding = style.padding.copy(left = parseLengthOrPercent(decl.value, style.fontSize)))
         // text-align。ComputedStyle側には既にフィールドがあったが、ここでの解決が漏れていたため
         // ページ側CSSでtext-align:center等を指定しても常にLEFT扱いになっていた(2026-08対応)。
         "text-align" -> style.copy(textAlign = parseTextAlign(decl.value))
@@ -198,7 +198,7 @@ class StyleResolver(
      * margin専用のshorthand展開。padding同様の1〜4値展開("上/上下+左右/上+左右+下/上右下左")に
      * 加え、"auto"トークンをleft/right個別に検出する(margin:auto centering、2026-08対応)。
      * top/bottomの"auto"はこのエンジンの(フレックスコンテキスト等を持たない)ブロックフロー
-     * 内では常に0として扱ってよい値のため、parseLength()の非数値→0フォールバックに
+     * 内では常に0として扱ってよい値のため、parseLengthOrPercent()の非数値→Px(0)フォールバックに
      * 素直に乗せている(padding用のparseBoxEdgesShorthandと処理を分けたのはこのため)。
      */
     private data class ParsedMargin(val edges: BoxEdges, val leftAuto: Boolean, val rightAuto: Boolean)
@@ -207,7 +207,11 @@ class StyleResolver(
         val tokens = value.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
         if (tokens.size !in 1..4) return ParsedMargin(current, currentLeftAuto, currentRightAuto)
 
-        val values = tokens.map { parseLength(it, fontSize) }
+        // "auto"トークンはparseLengthOrPercent()に通すとPx(0)になる(auto自体は
+        // marginLeftAuto/marginRightAutoという別フラグ側で表現するため、BoxEdges側の
+        // 値としては0で構わない——resolveHorizontalMargins()がautoフラグを見て
+        // このPx(0)を無視し、leftover配分に置き換える)。
+        val values = tokens.map { parseLengthOrPercent(it, fontSize) }
         val edges = when (tokens.size) {
             1 -> BoxEdges(values[0], values[0], values[0], values[0])
             2 -> BoxEdges(values[0], values[1], values[0], values[1])
@@ -228,19 +232,48 @@ class StyleResolver(
     }
 
     /**
-     * margin/padding共通の長さパーサー。px/em/rem/単位なし数値に対応する(2026-08、
-     * px単位のみだった旧parsePxOrZero()を拡張)。
+     * margin/padding共通の長さ・百分率パーサー。px/em/rem/単位なし数値はparseLength()に
+     * そのまま委譲し、"%"だけこちらでCssValue.Percentとして扱う(2026-08、margin/paddingの
+     * %対応。以前はここで0にフォールバックしていた)。
+     *
+     *   px/em/rem/単位なし: parseLength()の結果をCssValue.Pxとして返す
+     *   %: CssValue.Percent(実際のpx解決はLayoutEngine.resolveEdge()がレイアウト時に
+     *      containing blockの"幅"を基準に行う——CSS仕様上、margin/paddingの%は
+     *      top/bottom/left/rightいずれも幅基準になる点に注意。density倍しない
+     *      (widthの%指定(parseCssValue)と同じ考え方。比率なので適用先が既に
+     *      物理px基準なら二重に掛ける必要が無い)。
+     *
+     * fontSizeには呼び出し時点のstyle.fontSize(このカスケードでここまでに確定した
+     * 値)を渡すこと。同じ要素で"font-size"宣言がmarginより後に来る場合、その宣言が
+     * 反映される前の値を使ってしまう点は既知の制約(この簡易的な逐次カスケード評価
+     * 全体に共通する制約で、font-size自体のem/%解決がparentFontSizeという
+     * "常に確定済みの値"を基準にしているのとは事情が異なる)。
+     */
+    private fun parseLengthOrPercent(value: String, fontSize: Float): CssValue {
+        val trimmed = value.trim()
+        if (trimmed.endsWith("%")) {
+            return CssValue.Percent(trimmed.removeSuffix("%").toFloatOrNull() ?: 0f)
+        }
+        return CssValue.Px(parseLength(trimmed, fontSize))
+    }
+
+    /**
+     * margin/padding共通の長さパーサー(%を除く)。px/em/rem/単位なし数値に対応する
+     * (2026-08、px単位のみだった旧parsePxOrZero()を拡張)。
      *   px    : 絶対値そのまま
      *   em    : "その要素自身の"計算済みfontSizeを基準に乗算する。font-sizeのem
      *           (parentFontSize基準)とは基準が異なる点に注意——CSS仕様上、
      *           margin/paddingのemは常に要素自身のfont-sizeを基準にする。
      *   rem   : ROOT_FONT_SIZE_PX(簡易実装では16px固定)を基準に乗算
      *   単位なし: pxとして扱う(旧実装の寛容な挙動を踏襲)
-     *   %     : 今回は非対応(CSS仕様ではmargin/paddingの%はtop/bottom/left/right
-     *           いずれもcontaining blockの"幅"基準になるが、これはStyleResolverの
-     *           時点ではまだ分からずLayoutEngine側のavailableWidthが必要になる。
-     *           BoxEdgesを今のFloatから CssValue ベースへ拡張する必要があり、
-     *           影響範囲が大きいため今回は見送り、0にフォールバックする)
+     *   %     : 非対応、0にフォールバックする(この関数はFloatを返す都合上、%を
+     *           「px値」として表現できないため)。2026-08、margin/paddingの%対応時、
+     *           %の解決だけはこの関数を呼ぶ前段のparseLengthOrPercent()側で
+     *           個別に処理するようにした(CssValue.Percentとして保持し、実際のpx解決は
+     *           containing blockの幅が判明するLayoutEngine.resolveEdge()まで遅延させる
+     *           ——font-sizeのようにStyleResolverの時点で確定できる値とは事情が異なる)。
+     *           そのため、margin/padding経由でこの関数に"%"が渡ってくることは無い想定
+     *           (呼び出し元は必ずparseLengthOrPercent()経由にすること)。
      * fontSizeには呼び出し時点のstyle.fontSize(このカスケードでここまでに確定した
      * 値)を渡すこと。同じ要素で"font-size"宣言がmarginより後に来る場合、その宣言が
      * 反映される前の値を使ってしまう点は既知の制約(この簡易的な逐次カスケード評価
@@ -274,9 +307,11 @@ class StyleResolver(
      *   3値: 上, 左右, 下
      *   4値: 上, 右, 下, 左(時計回り)
      * パース不能な値数の場合は変更前のBoxEdgesをそのまま返す(安全側)。
+     * 2026-08、margin/paddingの%対応にあわせparseLengthOrPercent()を使うよう変更
+     * (以前は%を0にフォールバックするparseLength()を使っていた)。
      */
     private fun parseBoxEdgesShorthand(value: String, current: BoxEdges, fontSize: Float): BoxEdges {
-        val parts = value.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.map { parseLength(it, fontSize) }
+        val parts = value.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.map { parseLengthOrPercent(it, fontSize) }
         return when (parts.size) {
             1 -> BoxEdges(parts[0], parts[0], parts[0], parts[0])
             2 -> BoxEdges(parts[0], parts[1], parts[0], parts[1])

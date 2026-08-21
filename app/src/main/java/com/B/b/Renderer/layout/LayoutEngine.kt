@@ -116,9 +116,18 @@ class LayoutEngine(
         val style = element.computedStyle
         val outerWidth = resolveWidth(style.width, availableWidth)
         val (marginLeft, _) = resolveHorizontalMargins(style, outerWidth, availableWidth)
-        val width = outerWidth - style.padding.left - style.padding.right
-        val cursorYStart = originY + style.margin.top + style.padding.top
-        val contentX = originX + marginLeft + style.padding.left
+        // 2026-08、margin/paddingの%対応。CSS仕様上、margin/paddingの%はtop/bottom/
+        // left/rightいずれも「containing blockの"幅"」(=このlayoutBlock呼び出し自身の
+        // availableWidth)を基準に解決する——縦方向の辺(top/bottom)であっても高さでは
+        // なく幅が基準になる点に注意(初見だと直感に反するが、CSS仕様通りの挙動)。
+        val marginTop = resolveEdge(style.margin.top, availableWidth)
+        val paddingTop = resolveEdge(style.padding.top, availableWidth)
+        val paddingBottom = resolveEdge(style.padding.bottom, availableWidth)
+        val paddingLeft = resolveEdge(style.padding.left, availableWidth)
+        val paddingRight = resolveEdge(style.padding.right, availableWidth)
+        val width = outerWidth - paddingLeft - paddingRight
+        val cursorYStart = originY + marginTop + paddingTop
+        val contentX = originX + marginLeft + paddingLeft
 
         // 2026-08、display:flex対応。box model(margin/padding/width)の解決はブロックと
         // 共通のまま、子要素の配置アルゴリズムだけをlayoutFlexChildren()へ切り替える。
@@ -129,13 +138,13 @@ class LayoutEngine(
             layoutBlockChildren(element, availableWidth, width, contentX, cursorYStart, style)
         }
 
-        val contentHeight = cursorYEnd - originY - style.margin.top - style.padding.top
-        val totalHeight = resolveHeight(style.height, contentHeight) + style.padding.top + style.padding.bottom
+        val contentHeight = cursorYEnd - originY - marginTop - paddingTop
+        val totalHeight = resolveHeight(style.height, contentHeight) + paddingTop + paddingBottom
 
         element.computedRect = LayoutRect(
             x = (originX + marginLeft).toInt(),
-            y = (originY + style.margin.top).toInt(),
-            width = (width + style.padding.left + style.padding.right).toInt(),
+            y = (originY + marginTop).toInt(),
+            width = (width + paddingLeft + paddingRight).toInt(),
             height = totalHeight.toInt(),
         )
 
@@ -153,7 +162,7 @@ class LayoutEngine(
         // 二重カウントにはならない。img専用のlayoutImage()は最初から
         // このtopを含む形で実装されていた(結果的にそちらが正しい実装だった)ため、
         // 今回はlayoutBlock()側をlayoutImage()の流儀に合わせて修正している。
-        return originY + style.margin.top + totalHeight
+        return originY + marginTop + totalHeight
     }
 
     /**
@@ -219,12 +228,16 @@ class LayoutEngine(
 
                     if (child is ImageElement) {
                         val childBottom = layoutImage(child, width, contentX, cursorY)
-                        cursorY = childBottom + child.computedStyle.margin.bottom
+                        // 2026-08、margin/paddingの%対応。子要素のmargin%は「子要素自身の
+                        // containing blockの幅」= このコンテナのcontent width(width)基準
+                        // (子要素へのlayoutImage呼び出し自体もavailableWidth=widthで
+                        // 行っているのと同じ基準)。
+                        cursorY = childBottom + resolveEdge(child.computedStyle.margin.bottom, width)
                         return@forEach
                     }
 
                     val childBottom = layoutBlock(child, width, contentX, cursorY)
-                    cursorY = childBottom + child.computedStyle.margin.bottom
+                    cursorY = childBottom + resolveEdge(child.computedStyle.margin.bottom, width)
                 }
             }
         }
@@ -240,15 +253,37 @@ class LayoutEngine(
      * 余白を全て寄せる(CSS仕様通り)。width:autoの場合はouterWidth==availableWidthと
      * なりleftoverが0になるため、auto指定の有無に関わらず結果に影響しない
      * (「width:autoの時はauto marginが実質何もしない」というCSS仕様の挙動と自然に一致する)。
+     *
+     * 2026-08、margin/paddingの%対応にあわせ、style.margin.left/right(CssValue)を
+     * availableWidth基準でpxへ解決してから使うよう変更(以前は既にFloatだった)。
      */
     private fun resolveHorizontalMargins(style: ComputedStyle, outerWidth: Float, availableWidth: Float): Pair<Float, Float> {
         val leftover = (availableWidth - outerWidth).coerceAtLeast(0f)
+        val marginLeftPx = resolveEdge(style.margin.left, availableWidth)
+        val marginRightPx = resolveEdge(style.margin.right, availableWidth)
         return when {
             style.marginLeftAuto && style.marginRightAuto -> (leftover / 2f) to (leftover / 2f)
-            style.marginLeftAuto -> leftover to style.margin.right
-            style.marginRightAuto -> style.margin.left to leftover
-            else -> style.margin.left to style.margin.right
+            style.marginLeftAuto -> leftover to marginRightPx
+            style.marginRightAuto -> marginLeftPx to leftover
+            else -> marginLeftPx to marginRightPx
         }
+    }
+
+    /**
+     * margin/paddingのCssValue(px/%/auto)を実際のpx値へ解決する。2026-08、
+     * margin/paddingの%対応で追加。CSS仕様上、margin/paddingの%はtop/bottom/left/right
+     * いずれも「containing blockの幅」を基準にする——縦方向の辺でも高さではなく
+     * 幅が基準になるという、CSS仕様の中でも特に間違えやすい挙動なので、呼び出し側は
+     * 必ず「その要素の利用可能幅(availableWidth)」をpercentBaseとして渡すこと。
+     * autoは0として扱う(margin-left/right:autoは別途marginLeftAuto/marginRightAuto
+     * フラグで扱っており、この関数を通る時点では実質使わない値のため。padding:autoは
+     * CSS仕様上そもそも存在しない値だが、パース不能値からの安全なフォールバックとして
+     * 同様に0にしておく)。
+     */
+    private fun resolveEdge(value: CssValue, percentBase: Float): Float = when (value) {
+        is CssValue.Px -> value.value
+        is CssValue.Percent -> percentBase * (value.value / 100f)
+        CssValue.Auto -> 0f
     }
 
     /**
@@ -280,7 +315,9 @@ class LayoutEngine(
         val (boxWidth, boxHeight) = resolveImageBoxSize(element, style, availableWidth)
         val (marginLeft, _) = resolveHorizontalMargins(style, boxWidth, availableWidth)
         val originXWithMargin = originX + marginLeft
-        val originYWithMargin = originY + style.margin.top
+        // 2026-08、margin/paddingの%対応。imgのmargin-top%もcontaining blockの幅
+        // (availableWidth)基準(他のブロック要素と同じ、resolveEdge()参照)。
+        val originYWithMargin = originY + resolveEdge(style.margin.top, availableWidth)
 
         element.computedRect = LayoutRect(
             x = originXWithMargin.toInt(),

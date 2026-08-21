@@ -77,13 +77,50 @@ jobs:
           cd app/build/outputs/apk/debug/
           mv app-debug.apk "app-debug-${{ env.BUILD_DATE }}.apk"
 
-      - name: Upload APK artifact
+      # -----------------------------------------------------------------
+      # 1. ソースコードの Zip アーカイブを作成
+      # -----------------------------------------------------------------
+      - name: Create Source Zip Archive
+        run: |
+          zip -r "app-source-${{ env.BUILD_DATE }}.zip" . \
+            -x "*.git*" \
+            -x "*/build/*" \
+            -x "*/.gradle/*" \
+            -x "*.jks" \
+            -x "*.keystore"
+
+      # -----------------------------------------------------------------
+      # 2. Pandoc と WeasyPrint を使用して PDF ガイドを生成
+      # -----------------------------------------------------------------
+      - name: Install PDF conversion tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc python3-pip fonts-noto-cjk
+          pip install weasyprint --break-system-packages
+
+      - name: Generate PDF Documentation
+        run: |
+          # README.md から PDF を生成（日本語フォント適用）
+          if [ -f "README.md" ]; then
+            pandoc README.md -o "guide-${{ env.BUILD_DATE }}.pdf" \
+              --pdf-engine=weasyprint \
+              -V mainfont="Noto Sans CJK JP"
+          else
+            echo "README.md not found. Creating minimal notice PDF."
+            echo "# Build Documentation\n\nGenerated on ${{ env.BUILD_DATE }}" > temp.md
+            pandoc temp.md -o "guide-${{ env.BUILD_DATE }}.pdf" --pdf-engine=weasyprint
+          fi
+
+      # -----------------------------------------------------------------
+      # 3. APK、Zip、PDF をまとめて1つのアーティファクトとしてアップロード
+      # -----------------------------------------------------------------
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: "bb-renderer-debug-${{ env.BUILD_DATE }}"
-          path: "app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk"
+          path: |
+            app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk
+            app-source-${{ env.BUILD_DATE }}.zip
+            guide-${{ env.BUILD_DATE }}.pdf
           retention-days: 1
-          # 対象ファイルが1つも無い場合でも警告だけで成功扱いにする(デフォルト値)と、
-          # 「ビルドは緑なのに中身が空」という事故に気づけない。errorにして即座に
-          # 気づけるようにする(2026-08対応)。
           if-no-files-found: error

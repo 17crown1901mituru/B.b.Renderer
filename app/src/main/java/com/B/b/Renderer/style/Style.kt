@@ -67,9 +67,13 @@ sealed class CssValue {
     data class Percent(val value: Float) : CssValue()
 }
 
-data class BoxEdges(val top: Float, val right: Float, val bottom: Float, val left: Float) {
+// 2026-08、margin/paddingの%対応。以前はFloat(px解決済み)で持っていたが、
+// %指定はStyleResolverの時点ではまだcontaining blockの幅(=LayoutEngine側の
+// availableWidth)が分からず解決できないため、width/heightと同じCssValueベースに
+// 変更した。実際のpx解決はLayoutEngine.resolveEdge()がレイアウト時に行う。
+data class BoxEdges(val top: CssValue, val right: CssValue, val bottom: CssValue, val left: CssValue) {
     companion object {
-        val ZERO = BoxEdges(0f, 0f, 0f, 0f)
+        val ZERO = BoxEdges(CssValue.Px(0f), CssValue.Px(0f), CssValue.Px(0f), CssValue.Px(0f))
     }
 }
 

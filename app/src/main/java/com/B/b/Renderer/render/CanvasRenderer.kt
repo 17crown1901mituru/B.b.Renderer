@@ -55,10 +55,25 @@ class CanvasRenderer {
             textPaint.isUnderlineText = style.textDecoration == com.B.b.Renderer.style.TextDecoration.UNDERLINE
             canvas.drawText(
                 text,
-                rect.x.toFloat() + style.padding.left,
-                rect.y.toFloat() + style.padding.top + style.fontSize,
+                rect.x.toFloat() + resolveEdgeApprox(style.padding.left, rect),
+                rect.y.toFloat() + resolveEdgeApprox(style.padding.top, rect) + style.fontSize,
                 textPaint,
             )
         }
+    }
+
+    /**
+     * padding%の簡易解決(2026-08、margin/paddingの%対応にあわせた修正)。
+     * 本来CSS仕様ではcontaining blockの幅が基準だが、この暫定レンダラーは
+     * LayoutEngineが既に確定させたcomputedRectしか持っておらず、元のcontaining
+     * block幅を辿れない。そのため要素自身のrect.width(=既にpadding込みで確定済みの
+     * 幅)を基準に近似する——GPU本実装(GLEngineRenderer)側はLayoutEngine.resolveEdge()で
+     * 正しくcontaining block幅を基準に解決しているため、この近似のズレはPiPプレビュー
+     * (このCanvasRendererの主な用途)でのみ発生し、実際のページ表示には影響しない。
+     */
+    private fun resolveEdgeApprox(value: com.B.b.Renderer.style.CssValue, rect: com.B.b.Renderer.core.LayoutRect): Float = when (value) {
+        is com.B.b.Renderer.style.CssValue.Px -> value.value
+        is com.B.b.Renderer.style.CssValue.Percent -> rect.width * (value.value / 100f)
+        com.B.b.Renderer.style.CssValue.Auto -> 0f
     }
 }
