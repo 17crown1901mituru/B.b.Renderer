@@ -66,9 +66,12 @@ app/src/main/java/com/B/b/Renderer/
 
 - DOM構築・CSS解決・box model計算・HTMX差分検知・タッチ入力・メディア再生は実装済み
 - **GPUレンダリング実装済み**：`GpuCapabilityDetector`でTier判定し、MINIMAL判定時のみCanvas版にフォールバック。それ以外はGLES30による矩形バッチ描画＋テキストテクスチャ描画
+- **インラインフロー・`<a>`タグ実装済み**(2026-08)：`display:inline`要素とテキストが混在する内容(`<p>text <a>link</a> more</p>`等)を1つの折り返し塊として扱い、実ブラウザ同様「文中リンク」として描画・タップ判定できる。`<a>`のデフォルトスタイル(青字+下線)・タップ時のnavigate処理も対応済み。ただし`<a>`の中にさらに`<b>`等のインライン要素を入れる二重入れ子は非対応(`LayoutEngine.layoutInlineRun`のコメント参照)
+- **Flexboxレイアウト実装済み**(2026-08)：`flex-direction`(row/column)・`justify-content`・`align-items`・`flex-grow`/`flex-shrink`/`flex-basis`・`gap`に対応。`flex-wrap`は非対応(常にnowrap相当)、`flex-basis:auto`かつ`width/height:auto`な項目はコンテンツ量に応じた自動サイズ計算(shrink-to-fit)ができないため基準サイズ0扱い(`flex-grow`指定との組み合わせが前提。詳細は`LayoutEngine.layoutFlexRow`/`layoutFlexColumn`のコメント参照)
+- **margin/paddingの%指定に対応済み**(2026-08)：CSS仕様通り、top/bottom/left/right全てcontaining blockの"幅"を基準に解決する
 - **JSエンジン(Rhino)の組み込み・DOM/JSバインディングは未着手**（依存関係のみ`build.gradle.kts`に追加済み）
 - 外部`<link rel="stylesheet">`の取得は未対応(`<style>`インラインのみ)
-- コンパイル未検証（ローカルにAndroid SDK/Gradleがない環境で作成したため、pushでのCI結果を都度確認してください）
+- コンパイル未検証の範囲について：`<a>`タグ実装(インラインフロー導入前の版)までは実機でのビルド・動作を確認済み。Flexbox・margin/padding%・現行のインラインフロー実装は**まだ実機での動作確認前**のため、pushでのCI結果・実機ログ(`RENDER_DIAG`等)を都度確認してください
 
 ## htmx.js統合(任意)
 
@@ -115,4 +118,5 @@ htmx 2.0.10はFormDataラッパー(`kn`関数)内で`new Proxy(...)`を使って
 - `EngineActivity`の`initialUrl`は仮のプレースホルダー、Intent/設定からの受け取りに差し替える必要あり
 - `HtmxRenderEngine`内のノード単位dirty判定で、`ActionSignature`の空インスタンスを間に合わせで使っている箇所がある（次回リファクタ対象）
 - `<video>`/`<audio>`のGPU直結(`SurfaceTexture`経由)はGPUレンダリングパイプラインとまだ接続していない
-- テキストは1要素1テクスチャ方式のため、テキスト量が多いページではdrawCall数が増える(将来的な最適化余地)
+- テキストは「1つの折り返し塊(inline run)につき1テクスチャ」方式(2026-08、インラインフロー導入で「1要素1テクスチャ」から変更。`<a>`混在の段落等、同じ折り返し内の複数要素が1テクスチャを共有するようになった)。それでも段落数が多いページではdrawCall数が増える(将来的な最適化余地)
+- `network_security_config.xml`は`base-config cleartextTrafficPermitted="true"`にしてあります(2026-08、`https://`→`http://`へのリダイレクト先で「CLEARTEXT communication ... not permitted」となる不具合の修正)。**汎用ブラウザとしての意図的な設定**です——Chrome/Firefox等の一般ブラウザアプリも同様に平文通信を許可しており、危険性の警告はブラウザのUI側の役割としています。ここを`false`に戻すと、httpサイトが軒並み開けなくなるので注意してください

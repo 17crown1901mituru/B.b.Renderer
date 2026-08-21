@@ -15,6 +15,15 @@
          宣言漏れを発見)。 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- network_security_config.xmlはbase-config cleartextTrafficPermitted="true"に
+         している(2026-08、https→httpへのリダイレクト先で「CLEARTEXT communication
+         ... not permitted by network security policy」となり、外部サイトへの
+         遷移が失敗する不具合を修正した際の変更)。汎用ブラウザとしての意図的な設定で、
+         Chrome/Firefox等の一般ブラウザアプリも同様に平文通信をアプリ側で許可しており、
+         危険性の警告はブラウザのUI側の役割としている。localhost/127.0.0.1向けの
+         domain-configは元々開発用ローカルサーバー向けに個別許可していたものだが、
+         base-config側で全ドメイン許可済みのため現在は実質冗長(記録として残置)。
+         詳細はREADME.md「既知の要修正ポイント」参照。 -->
     <application
         android:allowBackup="true"
         android:label="@string/app_name"
