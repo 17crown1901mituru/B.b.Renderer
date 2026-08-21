@@ -1,5 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  2026-08、<a>タグ実装後の実機確認で発覚: https://iana.org/domains/example のような
+  リンクが「CLEARTEXT communication ... not permitted by network security policy」で
+  失敗する問題への対応。
+
+  原因: base-config(全ドメイン共通の既定値)が無く、localhost/127.0.0.1だけを
+  個別に平文許可していたため、それ以外の全ドメイン(=大半の実サイト)には
+  targetSdk 28以降のAndroid既定値(平文通信ブロック)がそのまま適用されていた。
+  今回のケースでは、遷移先(iana.orgからのリダイレクト等)がhttp://のURLだった
+  瞬間にOSレベルでブロックされていた。
+
+  B.b.Rendererは特定の自社APIとだけ通信する普通のアプリではなく、ユーザーが
+  入力した任意のURL(http://のサイトを含む)を表示する汎用ブラウザである。
+  Chrome/Firefox等の一般的なブラウザアプリも、この理由から平文通信を
+  アプリ側の設定で全面的に許可している(危険性はブラウザのUI側で「保護されていない
+  通信」等として警告するのが役割分担であり、OSのソケットレベルで一律ブロックする
+  対象ではない)。そのため、ここではbase-configでcleartextTrafficPermitted="true"を
+  ブラウザとしての既定値にする。
+
+  なお、localhost/127.0.0.1向けのdomain-configはbase-configの下ではもはや冗長
+  (base-configが全ドメインを平文許可するため)だが、「開発用ローカルサーバー向けに
+  意図的に平文許可している」という記録として残しておく。削除しても動作は変わらない。
+-->
 <network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">localhost</domain>
