@@ -613,8 +613,45 @@ class EngineActivity : AppCompatActivity() {
     }
 
     private fun fetchHtml(url: String): String {
+        // 2026-08、file://対応。毎回Termux等でローカルサーバーを立てないと動作確認できない
+        // 開発上の不便さの解消のため(実装作業自体のテストに使うページを直接file://で
+        // 開けるようにする)。OkHttpClientはhttp(s)専用なので、file://だけ別経路に分ける。
+        if (url.startsWith("file://", ignoreCase = true)) {
+            return readLocalFile(url)
+        }
         val response = okHttpClient.newCall(Request.Builder().url(url).build()).execute()
         return response.body?.string() ?: ""
+    }
+
+    /**
+     * file://スキームのローカルHTML読み込み(2026-08対応)。
+     *
+     * 対応範囲・既知の制約:
+     *   - Android 10(API 29)以降はスコープドストレージにより、アプリ専用ディレクトリ
+     *     (`getExternalFilesDir(null)`。権限無しでアクセス可)以外の公開ストレージ
+     *     (`/storage/emulated/0/Download`等)への直接File I/Oは、OS・端末の設定次第で
+     *     失敗し得る(`android:requestLegacyExternalStorage`はtargetSdk 30以降では
+     *     効果が無いため、この設定では救えない)。**確実に読めるのはアプリ専用
+     *     ディレクトリ配下のファイルのみ**という前提で、README.mdに配置場所の案内を
+     *     追記してある。
+     *   - 将来的にSAF(Storage Access Framework、`ACTION_OPEN_DOCUMENT`)経由の
+     *     `content://` URIに対応すれば、スコープドストレージ下でも任意の場所の
+     *     ファイルを追加権限無しで開けるようになる(今回は「ファイルを開く」UI自体が
+     *     無いため未対応。次回以降の検討事項)。
+     *   - 読み込み失敗時は空文字列を返す(呼び出し元のfetchHtml→errorPageHtmlの
+     *     フローに自然に乗り、クラッシュはしない)。
+     */
+    private fun readLocalFile(fileUrl: String): String {
+        return runCatching {
+            val path = Uri.parse(fileUrl).path ?: return@runCatching ""
+            java.io.File(path).readText()
+        }.getOrElse { e ->
+            BehaviorAuditLog.record(
+                BehaviorAuditLog.Category.RENDER_DIAG,
+                "local file read failed: $fileUrl (${e.javaClass.simpleName}: ${e.message})",
+            )
+            ""
+        }
     }
 
     /**
@@ -672,9 +709,17 @@ class EngineActivity : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.IO).launch {
             val bitmap = runCatching {
-                val response = okHttpClient.newCall(Request.Builder().url(absoluteUrl).build()).execute()
-                response.body?.bytes()?.let { bytes ->
-                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                // 2026-08、file://対応。fetchHtml()と同じ理由でOkHttpClientの経路とは
+                // 分ける(local HTMLから相対パスで参照される画像もfile://で解決される
+                // ため、こちらにも対応が必要)。
+                if (absoluteUrl.startsWith("file://", ignoreCase = true)) {
+                    val path = Uri.parse(absoluteUrl).path
+                    path?.let { android.graphics.BitmapFactory.decodeFile(it) }
+                } else {
+                    val response = okHttpClient.newCall(Request.Builder().url(absoluteUrl).build()).execute()
+                    response.body?.bytes()?.let { bytes ->
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    }
                 }
             }.getOrNull()
 

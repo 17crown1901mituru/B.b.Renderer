@@ -69,9 +69,31 @@ app/src/main/java/com/B/b/Renderer/
 - **インラインフロー・`<a>`タグ実装済み**(2026-08)：`display:inline`要素とテキストが混在する内容(`<p>text <a>link</a> more</p>`等)を1つの折り返し塊として扱い、実ブラウザ同様「文中リンク」として描画・タップ判定できる。`<a>`のデフォルトスタイル(青字+下線)・タップ時のnavigate処理も対応済み。ただし`<a>`の中にさらに`<b>`等のインライン要素を入れる二重入れ子は非対応(`LayoutEngine.layoutInlineRun`のコメント参照)
 - **Flexboxレイアウト実装済み**(2026-08)：`flex-direction`(row/column)・`justify-content`・`align-items`・`flex-grow`/`flex-shrink`/`flex-basis`・`gap`に対応。`flex-wrap`は非対応(常にnowrap相当)、`flex-basis:auto`かつ`width/height:auto`な項目はコンテンツ量に応じた自動サイズ計算(shrink-to-fit)ができないため基準サイズ0扱い(`flex-grow`指定との組み合わせが前提。詳細は`LayoutEngine.layoutFlexRow`/`layoutFlexColumn`のコメント参照)
 - **margin/paddingの%指定に対応済み**(2026-08)：CSS仕様通り、top/bottom/left/right全てcontaining blockの"幅"を基準に解決する
+- **file://によるローカルHTML/画像の直接読み込みに対応済み**(2026-08)：開発中の動作確認のたびにTermux等でHTTPサーバーを立てる手間を無くすために追加。下記「ローカルファイルでの動作確認」参照
+- SVG画像は非対応(`android.graphics.BitmapFactory`はラスター画像(PNG/JPEG/WEBP等)専用で、XMLベースのSVGはデコードできない。読み込み自体は試みるが`ImageLoadState.FAILED`になり、クラッシュはしない)
 - **JSエンジン(Rhino)の組み込み・DOM/JSバインディングは未着手**（依存関係のみ`build.gradle.kts`に追加済み）
 - 外部`<link rel="stylesheet">`の取得は未対応(`<style>`インラインのみ)
 - コンパイル未検証の範囲について：`<a>`タグ実装(インラインフロー導入前の版)までは実機でのビルド・動作を確認済み。Flexbox・margin/padding%・現行のインラインフロー実装は**まだ実機での動作確認前**のため、pushでのCI結果・実機ログ(`RENDER_DIAG`等)を都度確認してください
+
+## ローカルファイルでの動作確認(file://)
+
+開発中のHTMLを毎回どこかにアップロードしたり、Termuxでサーバーを立てたりしなくても、`file://`で直接開いて確認できます。
+
+1. 確認したい`.html`ファイルを、**端末の以下のディレクトリ**に配置する(MT Managerで配置してOK):
+   ```
+   /storage/emulated/0/Android/data/com.B.b.Renderer/files/
+   ```
+   このディレクトリ(`Context.getExternalFilesDir(null)`が指す場所)は**アプリ専用領域なので、Android 10以降のスコープドストレージ制限を受けず、追加の権限操作無しで確実に読み書きできる**。存在しなければ作成してよい(アプリ起動後に自動生成されることもある)。
+2. アプリのアドレスバーに次の形式で入力する:
+   ```
+   file:///storage/emulated/0/Android/data/com.B.b.Renderer/files/test.html
+   ```
+   (`file://` のあとに絶対パスをそのまま続ける。スキームの後ろが `///` と3連続スラッシュになる点に注意——`file://` + 絶対パス `/storage/...` を連結すると自然にそうなる)
+3. HTML内から`<img src="images/photo.png">`のように相対パスで画像を参照している場合も、同じディレクトリ配下に置けば自動的に解決される。
+
+**`/storage/emulated/0/Download`等の「一般の公開ストレージ」に置いたファイルを直接`file://`で開きたい場合**は、Android 10以降ではOS側のスコープドストレージ制限により読み込みに失敗することがある(`AndroidManifest.xml`の`READ_EXTERNAL_STORAGE`権限は`maxSdkVersion="32"`を付けており、API 33以降ではそもそも効果を持たない)。確実に動かしたい場合は上記のアプリ専用ディレクトリを使うこと。将来的にSAF(`ACTION_OPEN_DOCUMENT`、システムのファイルピッカー)経由の`content://`対応を追加すれば、この制限を受けずに任意の場所のファイルを開けるようになる(現状は未対応)。
+
+読み込みに失敗した場合はクラッシュせず、`RENDER_DIAG`ログに`local file read failed: ...`という形で理由(`FileNotFoundException`等)が記録される(ハンバーガーメニューのデバッグログパネルで確認可能)。
 
 ## htmx.js統合(任意)
 

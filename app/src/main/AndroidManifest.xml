@@ -14,6 +14,14 @@
          この権限が無いとSecurityExceptionでクラッシュする(2026-07、マニフェスト確認時に
          宣言漏れを発見)。 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 2026-08、file://によるローカルHTML/画像読み込み対応で追加。API 33以降は
+         スコープドストレージ+細分化されたメディア権限に置き換わっており、この権限は
+         意味を持たなくなる(アプリ専用ディレクトリ配下は元々権限不要でアクセス可)ため
+         maxSdkVersionで上限を切ってある。API 26〜32の端末で公開ストレージ
+         (/storage/emulated/0/Download等)のファイルをfile://で直接開きたい場合のみ、
+         この権限のランタイム許可(設定アプリからの手動許可でも可)が必要になる。
+         詳細はEngineActivity.readLocalFile()・README.md参照。 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <!-- network_security_config.xmlはbase-config cleartextTrafficPermitted="true"に
          している(2026-08、https→httpへのリダイレクト先で「CLEARTEXT communication
