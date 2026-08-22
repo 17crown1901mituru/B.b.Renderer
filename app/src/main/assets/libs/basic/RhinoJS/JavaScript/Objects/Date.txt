@@ -1,8 +1,0 @@
-   var date =  new Date();
-   print(date);
-   print(Number(date));
-   print(date.toDateString());
-   print(date.getDay());
-   print(date.getMonth());
-   print(date.getFullYear());
-   

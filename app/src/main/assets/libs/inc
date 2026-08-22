@@ -1,0 +1,267 @@
+    function alert(msg,title,icon)
+   {
+      var icn;
+      icn = icon;
+       if (icon== undefined )icn =  false ;
+       return  new pkg.utils.Alert(ctx,title||'Alert',String(msg),icn).waitUntilDismiss();
+   }
+    function popup(msg)
+   {
+      var message = String(msg);
+      var Toast = Packages.android.widget.Toast;
+       if ((android.os.Looper.getMainLooper().getThread()==java.lang.Thread.currentThread()))
+      {
+         Toast.makeText(ctx,message,Toast.LENGTH_LONG).show();
+      }
+       else 
+      {
+         ctx.runOnUiThread( new java.lang.Runnable( function ()
+         {
+            Toast.makeText(ctx,message,Toast.LENGTH_LONG).show();
+         }
+         ));
+      }
+      
+   }
+    function prompt(msg,defaulttext,title,icon)
+   {
+      var icn;
+      icn = icon;
+       if (icon== undefined )icn =  false ;
+       return  new pkg.utils.Prompt(ctx,title||'Prompt',String(msg),defaulttext,icn).waitUntilDismiss();
+   }
+    function confirm(msg,title,icon)
+   {
+      var icn;
+      icn = icon;
+      if (icon==undefined )icn = false ;
+      return  new pkg.utils.Confirm(ctx,title||'Confirm',String(msg),icn).waitUntilDismiss();
+   }
+    function select(items,title,icon)
+   {
+      var icn;
+      icn = icon;
+      if (icon== undefined )icn =  false ;
+       return  new pkg.utils.Select(ctx,title||'Choose',items,icn).waitUntilDismiss();
+   }
+    function range(msg,end,start,def,title,icon)
+   {
+      var icn;
+      var df = 0;
+      var strt = 0;
+      icn = icon;
+       if (icon== undefined )icn =  false ;
+       if (def)df = def;
+       if (start)strt = start;
+       return  new pkg.utils.Range(ctx,title||'Range',String(msg),strt,end,df,icn).waitUntilDismiss();
+   }
+    function multichoice(items,checked,returnType,title,icon)
+   {
+      var icn;
+      icn = icon;
+       if (icon== undefined )icn =  false ;
+      var RETURN_STRING = 1;
+      var RETURN_NUMBER = 2;
+      var art =  new pkg.utils.MultiChoice(ctx,title||'MultiChoice',items,checked,icn);
+       if (returnType==RETURN_STRING)
+      {
+          return art.getReturnString();
+      }
+       else 
+      {
+          return art.getReturnInt();
+      }
+      
+   }
+    function choose(items,checked,returnType,title,icon)
+   {
+      var icn;
+      icn = icon;
+       if (icon== undefined )icn =  false ;
+      var RETURN_STRING = 1;
+      var RETURN_NUMBER = 2;
+      var art =  new pkg.utils.Choose(ctx,title||'SingleChoice',items,checked,icn);
+       if (returnType==RETURN_STRING)
+      {
+          return art.getReturnString();
+      }
+       else 
+      {
+          return Number(art.getReturnInt());
+      }
+      
+   }
+    function setInterval(func,time,back)
+   {
+      var inte =  new pkg.utils.Interval(time,time);
+      inte.setIntervalListener( function ()
+      {
+        if(!back){
+         ctx.runOnUiThread( function ()
+         {
+            (func)();
+         }
+         );
+         }else{
+          (func)();
+         }
+      }
+      );
+       return inte;
+   }
+    function setTimeout(func,time,back)
+   {
+      var inte =  new pkg.utils.Interval(time,time);
+      inte.setIntervalListener( function ()
+      {
+        if(!back){
+         ctx.runOnUiThread( function ()
+         {
+            (func)();
+         }
+         );
+         }else{
+         (func)();
+         }
+         inte.stop();
+      }
+      );
+       return inte;
+   }
+    function saveText(tag,value,name)
+   {
+      var nme;
+      nme = name||"main";
+      var sp = ctx.getSharedPreferences(nme,0);
+      switch ( typeof (value))
+      {
+         case "number":sp.edit().putInt(tag,value).commit();
+          break ;
+         case "boolean":sp.edit().putBoolean(tag,value).commit();
+          break ;
+         case "string":sp.edit().putString(tag,value).commit();
+          break ;
+          default :
+      }
+      
+   }
+    function loadText(tag,name)
+   {
+      var chk;
+      var nme;
+      nme = name||"main";
+      var sp = ctx.getSharedPreferences(nme,0);
+      try 
+      {
+         chk = sp.getInt(tag,0);
+      }
+       catch (e)
+      {
+         try 
+         {
+            chk = sp.getBoolean(tag, false );
+         }
+          catch (e)
+         {
+            chk = sp.getString(tag,"");
+         }
+         
+      }
+       return chk;
+   }
+   function jsArray(javaArray)
+   {
+      var jsA = [];
+      var len = javaArray.length;
+      var i = 0;
+      while (i<len)
+      {
+         jsA[i] = String(javaArray[i]);
+         i++;
+      }
+       return jsA;
+   }
+   
+   
+    function props(obj)
+   {
+      var str = "";
+      var arr = [];
+      for (var x in obj)
+      {
+         arr.push(x);
+      }
+      arr = arr.sort();
+      for (var i = 0;i<arr.length;i++)
+      {
+         try 
+         {
+            str += arr[i]+"\n\n" + obj[arr[i]]+"\n\n\n";
+         }
+          catch (e){}
+      }
+       return str;
+   }
+   
+    function bTask(func,func2)
+   {
+      var as =  new pkg.utils.JASAsyncTask();
+      as.doInBackground( function (v)
+      {
+         (func)(v);
+      }
+      );
+      as.onPostExecute( function (v)
+      {
+          if (func2)(func2)(v);
+      }
+      );
+       as.execute();
+       return as;
+   }
+    function runOnUIThread(func)
+   {
+      ctx.runOnUiThread( new java.lang.Runnable(func));
+   }
+    function bThread(func)
+   {
+      var t =  new java.lang.Thread( new java.lang.Runnable(func));
+      t.start();
+       return t;
+   }
+    function bUIThread(func)
+   {
+       return bThread( function ()
+      {
+         runOnUIThread(func);
+      }
+      );
+   }
+    function setStatusBarBackgroundColor(color)
+   {
+       if (android.os.Build.VERSION.SDK_INT>=21)
+      {
+         ctx.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+         ctx.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+         ctx.getWindow().setStatusBarColor(color);
+      }
+      
+   }
+    function setTaskDescription(title,bitmap,color)
+   {
+       if (android.os.Build.VERSION.SDK_INT>=21)
+      {
+         ctx.setTaskDescription( new android.app.ActivityManager.TaskDescription(title,bitmap,color));
+      }
+      
+   }
+    function setActionBarBackgroundColor(color)
+   {
+       if (ctx.getActionBar()!= null )
+      {
+         ctx.getActionBar().setBackgroundDrawable( new android.graphics.drawable.ColorDrawable(color));
+      }
+      
+   }
+   
+

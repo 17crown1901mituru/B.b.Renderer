@@ -1,6 +1,0 @@
-// Checks whether object contains property
-
-var dog = {name:"Dog",age:3};
-
-print("color" in dog);
-print("age" in dog);

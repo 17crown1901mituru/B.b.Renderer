@@ -1,2 +1,0 @@
-var bool = Boolean(true);
-print(bool.valueOf());

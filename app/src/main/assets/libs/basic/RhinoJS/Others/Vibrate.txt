@@ -1,9 +1,0 @@
-   var VibrationEffect = Packages.android.os.VibrationEffect;
-   var timeout = 500;
-   var amplitude = VibrationEffect.DEFAULT_AMPLITUDE;
-   var vb = ctx.getSystemService(ctx.VIBRATOR_SERVICE);
-   //	vb.vibrate(timeout);
-   vb.vibrate(VibrationEffect.createOneShot(timeout,amplitude));
-   
-   //Exit app
-   ctx.finish();
