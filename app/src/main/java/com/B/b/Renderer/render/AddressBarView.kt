@@ -75,6 +75,18 @@ class AddressBarView(context: Context) : FrameLayout(context) {
             }
         }
 
+        // 2026-08、フォーカス時に全選択するよう変更。以前はタップしてもカーソンが
+        // 既存文字列の途中に入るだけで、消し忘れたまま別のURLを続けて打つと
+        // "https://" + "file:///storage/..." のような変な連結が起きていた
+        // (実際に発生: https://File:///storage/emulated/0/Download/image_test.html)。
+        // Chrome等の一般的なブラウザのアドレスバーと同じく「タップしたら全選択、
+        // そのまま打てば置き換わる」挙動にすることで、この種の入力ミスを防ぐ。
+        editText.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                editText.post { editText.selectAll() }
+            }
+        }
+
         // このビュー自身がステータスバー分のtop paddingを持つ(edge-to-edge対応)。
         // engineViewRoot側は従来通り触らない(ページがシステムバー裏まで塗られる
         // ユースケースを維持するため)。
