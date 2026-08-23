@@ -1,4 +1,4 @@
-name: Build APK
+Name: Build APK
 
 on:
   push:
@@ -78,49 +78,108 @@ jobs:
           mv app-debug.apk "app-debug-${{ env.BUILD_DATE }}.apk"
 
       # -----------------------------------------------------------------
-      # 1. ソースコードの Zip アーカイブを作成
+      # Python & ReportLab のセットアップ
       # -----------------------------------------------------------------
-      - name: Create Source Zip Archive
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
         run: |
-          zip -r "app-source-${{ env.BUILD_DATE }}.zip" . \
-            -x "*.git*" \
-            -x "*/build/*" \
-            -x "*/.gradle/*" \
-            -x "*.jks" \
-            -x "*.keystore"
+          pip install reportlab
 
       # -----------------------------------------------------------------
-      # 2. Pandoc と WeasyPrint を使用して PDF ガイドを生成
+      # APK構造を解析して内部ドキュメントPDFを生成＆APK(ZIP)直下に追記
       # -----------------------------------------------------------------
-      - name: Install PDF conversion tools
+      - name: Embed Structure PDF into APK
         run: |
-          sudo apt-get update
-          sudo apt-get install -y pandoc python3-pip fonts-noto-cjk
-          pip install weasyprint --break-system-packages
+          python3 - << 'EOF'
+          import sys
+          import os
+          import zipfile
+          import tempfile
+          from reportlab.lib.pagesizes import letter
+          from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted, PageBreak
+          from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+          from reportlab.lib import colors
 
-      - name: Generate PDF Documentation
-        run: |
-          # README.md から PDF を生成（日本語フォント適用）
-          if [ -f "README.md" ]; then
-            pandoc README.md -o "guide-${{ env.BUILD_DATE }}.pdf" \
-              --pdf-engine=weasyprint \
-              -V mainfont="Noto Sans CJK JP"
-          else
-            echo "README.md not found. Creating minimal notice PDF."
-            echo "# Build Documentation\n\nGenerated on ${{ env.BUILD_DATE }}" > temp.md
-            pandoc temp.md -o "guide-${{ env.BUILD_DATE }}.pdf" --pdf-engine=weasyprint
-          fi
+          apk_path = "app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk"
+          pdf_filename = "apk_structure.pdf"
+
+          print(f"[*] Analyzing APK structure: {apk_path}")
+
+          with tempfile.TemporaryDirectory() as temp_dir:
+              temp_pdf_path = os.path.join(temp_dir, pdf_filename)
+              doc = SimpleDocTemplate(temp_pdf_path, pagesize=letter)
+              story = []
+              styles = getSampleStyleSheet()
+
+              code_style = ParagraphStyle(
+                  'CodeStyle',
+                  fontName='Courier',
+                  fontSize=7,
+                  leading=9,
+                  textColor=colors.black
+              )
+
+              title_style = styles['Title']
+              h1_style = styles['Heading1']
+              h2_style = styles['Heading2']
+
+              story.append(Paragraph(f"APK Document: {os.path.basename(apk_path)}", title_style))
+              story.append(Spacer(1, 12))
+
+              with zipfile.ZipFile(apk_path, 'r') as z:
+                  # 1. APK内部の階層構造を出力
+                  story.append(Paragraph("1. APK Internal Directory Structure", h1_style))
+                  tree_text = "\n".join(z.namelist())
+                  story.append(Preformatted(tree_text, code_style))
+                  story.append(PageBreak())
+
+                  # 2. テキスト系ファイル（AndroidManifest.xml等の文字列解読試行や設定ファイル）の中身を出力
+                  story.append(Paragraph("2. Internal Files Content", h1_style))
+                  story.append(Spacer(1, 12))
+
+                  for filename in z.namelist():
+                      if filename.endswith('/') or filename == pdf_filename:
+                          continue
+
+                      story.append(Paragraph(f"File: {filename}", h2_style))
+                      try:
+                          content = z.read(filename)
+                          text = content.decode('utf-8', errors='replace')
+                          if not text.strip():
+                              text = "[Empty File]"
+                      except Exception as e:
+                          text = f"[Read Error / Binary File: {e}]"
+
+                      story.append(Preformatted(text, code_style))
+                      story.append(Spacer(1, 14))
+
+              doc.build(story)
+
+              # 生成したPDFをAPK (ZIP構造) のルート直下に書き込み追加
+              print(f"[*] Appending '{pdf_filename}' into APK root...")
+              with zipfile.ZipFile(apk_path, 'a') as z:
+                  z.write(temp_pdf_path, arcname=pdf_filename)
+
+              # アーティファクト用として独立したPDFファイルも保存
+              import shutil
+              shutil.copy(temp_pdf_path, f"app-debug-${{ env.BUILD_DATE }}-structure.pdf")
+
+          print("[+] Successfully embedded PDF structure into APK!")
+          EOF
 
       # -----------------------------------------------------------------
-      # 3. APK、Zip、PDF をまとめて1つのアーティファクトとしてアップロード
+      # アーティファクトのアップロード（PDF内包済みAPK と 抽出用PDF）
       # -----------------------------------------------------------------
-      - name: Upload Build Artifacts
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: "bb-renderer-debug-${{ env.BUILD_DATE }}"
           path: |
             app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk
-            app-source-${{ env.BUILD_DATE }}.zip
-            guide-${{ env.BUILD_DATE }}.pdf
+            app-debug-${{ env.BUILD_DATE }}-structure.pdf
           retention-days: 1
           if-no-files-found: error
