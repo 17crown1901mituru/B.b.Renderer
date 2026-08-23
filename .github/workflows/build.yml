@@ -54,7 +54,12 @@ jobs:
 
       - name: Set current date
         run: |
-          echo "BUILD_DATE=$(TZ='Asia/Tokyo' date +'%Y%m%d-%H%M')" >> $GITHUB_ENV          
+          echo "BUILD_DATE=$(TZ='Asia/Tokyo' date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
+          # versionCode用。Intに収める必要があるためUnixエポック秒を使う
+          # (BUILD_DATEのYYYYMMDDHHmm形式は12桁でInt上限[約21億]を超えるため使えない)。
+          # 2026-08対応: versionCodeが常に固定の1のままだったため、MT Managerの
+          # 「インストール前にversionCodeを検証する」設定に引っかかり、APKの中身が
+          # 変わっていても実質再インストールされない事故が起きていた。
           echo "BUILD_VERSION_CODE=$(date +'%s')" >> $GITHUB_ENV
 
       - name: Build debug APK
@@ -69,7 +74,7 @@ jobs:
 
       - name: Rename APK file
         run: |
-          cd app/
+          cd app/build/outputs/apk/debug/
           mv app-debug.apk "app-debug-${{ env.BUILD_DATE }}.apk"
 
       # -----------------------------------------------------------------
@@ -114,8 +119,8 @@ jobs:
         with:
           name: "bb-renderer-debug-${{ env.BUILD_DATE }}"
           path: |
-             app-debug-${{ env.BUILD_DATE }}.apk
+            app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk
             app-source-${{ env.BUILD_DATE }}.zip
-                 guide-${{ env.BUILD_DATE }}.pdf
+            guide-${{ env.BUILD_DATE }}.pdf
           retention-days: 1
           if-no-files-found: error
