@@ -1,4 +1,4 @@
-name: Build APK
+Name: Build APK
 
 on:
   push:
@@ -90,9 +90,10 @@ jobs:
           pip install reportlab
 
       # -----------------------------------------------------------------
-      # APK構造を解析して内部ドキュメントPDFを生成＆APK(ZIP)直下に追記
+      # 1. リポジトリ構造から ZIP ファイルを作成
+      # 2. その ZIP を解析して PDF を生成し、ZIP 内に追加 (repo2zip_pdf.py 相当)
       # -----------------------------------------------------------------
-      - name: Embed Structure PDF into APK
+      - name: Generate Source ZIP with Embedded PDF Document
         run: |
           python3 - << 'EOF'
           import sys
@@ -104,11 +105,24 @@ jobs:
           from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
           from reportlab.lib import colors
 
-          apk_path = "app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk"
-          pdf_filename = "apk_structure.pdf"
+          zip_name = "app-source-${{ env.BUILD_DATE }}.zip"
+          pdf_filename = "project_structure_and_code.pdf"
 
-          print(f"[*] Analyzing APK structure: {apk_path}")
+          # 1. リポジトリを ZIP 化 (不要なビルドファイルを除外)
+          print(f"[*] Creating ZIP from repository: {zip_name}")
+          with zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED) as z:
+              for root, dirs, files in os.walk('.'):
+                  # .git や build 等の大きすぎるディレクトリを除外
+                  dirs[:] = [d for d in dirs if d not in ['.git', '.gradle', 'build', '.idea']]
+                  for file in files:
+                      if file.endswith(('.zip', '.pdf', '.jks', '.keystore')):
+                          continue
+                      full_path = os.path.join(root, file)
+                      rel_path = os.path.relpath(full_path, '.')
+                      z.write(full_path, arcname=rel_path)
 
+          # 2. ZIP 内の構造とソースコードから PDF を生成し、ZIP 内に追記
+          print(f"[*] Generating PDF document from ZIP content...")
           with tempfile.TemporaryDirectory() as temp_dir:
               temp_pdf_path = os.path.join(temp_dir, pdf_filename)
               doc = SimpleDocTemplate(temp_pdf_path, pagesize=letter)
@@ -127,18 +141,16 @@ jobs:
               h1_style = styles['Heading1']
               h2_style = styles['Heading2']
 
-              story.append(Paragraph(f"APK Document: {os.path.basename(apk_path)}", title_style))
+              story.append(Paragraph(f"Repository Document: {zip_name}", title_style))
               story.append(Spacer(1, 12))
 
-              with zipfile.ZipFile(apk_path, 'r') as z:
-                  # 1. APK内部の階層構造を出力
-                  story.append(Paragraph("1. APK Internal Directory Structure", h1_style))
+              with zipfile.ZipFile(zip_name, 'r') as z:
+                  story.append(Paragraph("1. Directory Structure", h1_style))
                   tree_text = "\n".join(z.namelist())
                   story.append(Preformatted(tree_text, code_style))
                   story.append(PageBreak())
 
-                  # 2. テキスト系ファイル（AndroidManifest.xml等の文字列解読試行や設定ファイル）の中身を出力
-                  story.append(Paragraph("2. Internal Files Content", h1_style))
+                  story.append(Paragraph("2. Source Code Contents", h1_style))
                   story.append(Spacer(1, 12))
 
                   for filename in z.namelist():
@@ -159,27 +171,23 @@ jobs:
 
               doc.build(story)
 
-              # 生成したPDFをAPK (ZIP構造) のルート直下に書き込み追加
-              print(f"[*] Appending '{pdf_filename}' into APK root...")
-              with zipfile.ZipFile(apk_path, 'a') as z:
+              print(f"[*] Appending '{pdf_filename}' into '{zip_name}'...")
+              with zipfile.ZipFile(zip_name, 'a') as z:
                   z.write(temp_pdf_path, arcname=pdf_filename)
 
-              # アーティファクト用として独立したPDFファイルも保存
-              import shutil
-              shutil.copy(temp_pdf_path, f"app-debug-${{ env.BUILD_DATE }}-structure.pdf")
-
-          print("[+] Successfully embedded PDF structure into APK!")
+          print("[+] Process finished successfully!")
           EOF
 
       # -----------------------------------------------------------------
-      # アーティファクトのアップロード（PDF内包済みAPK と 抽出用PDF）
+      # アーティファクトのアップロード（インストール可能なAPK + 内包ZIP）
       # -----------------------------------------------------------------
-      - name: Upload APK artifact
+      - name: Upload APK & Document Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: "bb-renderer-debug-${{ env.BUILD_DATE }}"
           path: |
             app/build/outputs/apk/debug/app-debug-${{ env.BUILD_DATE }}.apk
-            app-debug-${{ env.BUILD_DATE }}-structure.pdf
+            app-source-${{ env.BUILD_DATE }}.zip
           retention-days: 1
           if-no-files-found: error
+
