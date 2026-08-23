@@ -37,11 +37,11 @@ class LocalFilePicker(activity: ComponentActivity, private val onPicked: (Uri) -
     }
 
     /**
-     * ファイルピッカーを開く。mimeTypeは意図的に"*/*"にしている——HTMLファイルの
-     * Content-Typeはファイルマネージャ/プロバイダによって"text/html"/"text/plain"/
-     * "application/octet-stream"等まちまちで、"text/html"に絞ると実機で候補から
-     * 弾かれてしまうことが多いため(拡張子ベースの厳密フィルタは行わず、
-     * どんなファイルでも選べるようにしておく実用上の判断)。
+     * ファイルピッカーを開く。mimeTypeは意図的にワイルドカード(全MIME型許可)にしている
+     * ——HTMLファイルのContent-Typeはファイルマネージャ/プロバイダによって
+     * text/html・text/plain・application/octet-stream等まちまちで、html系だけに
+     * 絞ると実機で候補から弾かれてしまうことが多いため(拡張子ベースの厳密フィルタは
+     * 行わず、どんなファイルでも選べるようにしておく実用上の判断)。
      */
     fun launch() {
         launcher.launch(arrayOf("*/*"))
