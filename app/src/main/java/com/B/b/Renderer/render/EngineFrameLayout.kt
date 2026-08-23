@@ -142,10 +142,19 @@ class EngineFrameLayout(
             insets
         }
 
+        // 2026-08、ソフトキーボード表示中にこのボタンが隠れてしまう問題への対応。
+        // 以前はsystemBars(ナビゲーションバー)のinsetsしか見ておらず、IME(ソフト
+        // キーボード)が画面下からせり上がってボタンを覆っても、ボタン自身の位置は
+        // 動かなかった。ime()のinsetsも取得し、systemBarsとimeの大きい方をbottomMargin
+        // に採用することで、キーボード表示中は自動的にその上まで浮き上がるようにした
+        // (キーボードが無い時はsystemBars.bottom、ある時はime.bottomの方が大きくなるので
+        // 自然に切り替わる。ドラッグで自由配置する「フローティングボタン」化は今回は
+        // 見送り、既存のBOTTOM|END固定位置のまま「隠れないよう動く」方だけ対応した)。
         ViewCompat.setOnApplyWindowInsetsListener(drawerToggleButton) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             val params = view.layoutParams as FrameLayout.LayoutParams
-            params.bottomMargin = dp(12) + bars.bottom
+            params.bottomMargin = dp(12) + maxOf(bars.bottom, ime.bottom)
             params.rightMargin = dp(12) + bars.right
             view.layoutParams = params
             insets
@@ -154,8 +163,17 @@ class EngineFrameLayout(
 
     /**
      * endドロワー(現状はDebugDrawerView)をこのフレームに差し込む。
-     * ドロワー自身にはシステムバー分の上下パディングを入れる
+     * ドロワー自身にはシステムバー分の上下左右のinsetsを反映する
      * (ドロワー内の先頭要素がステータスバーに被らないようにするため)。
+     *
+     * 2026-08訂正: 以前はtop/bottomのinsetsしか見ておらず、横向き時のノッチや
+     * ジェスチャーバー等によるleft/right側のinsetsを無視していた(「ステータスバー幅を
+     * 考慮しているか」という指摘で発覚)。またinsetsコールバックは回転やIME表示等で
+     * 複数回呼ばれ得るのに、その都度`view.paddingLeft`(前回のコールバックで
+     * 既に書き換え済みの値)を基準に足し込んでいたため、呼ばれるたびにパディングが
+     * 際限なく増えていくバグも同時に持っていた。ここではView自身が元々持っていた
+     * 固定パディング(basePadding、コールバック登録前に1度だけ読む)を基準に、
+     * 毎回そこへinsetsを足す形に直した。
      *
      * @param drawerView 差し込むドロワーの中身のView
      * @param onOpened ドロワーが開いた時のコールバック(自動更新の開始等に使う想定)
@@ -171,9 +189,11 @@ class EngineFrameLayout(
             override fun onDrawerClosed(view: View) = onClosed()
         })
 
+        val basePaddingLeft = drawerView.paddingLeft
+        val basePaddingRight = drawerView.paddingRight
         ViewCompat.setOnApplyWindowInsetsListener(drawerView) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(view.paddingLeft, bars.top, view.paddingRight, bars.bottom)
+            view.setPadding(basePaddingLeft + bars.left, bars.top, basePaddingRight + bars.right, bars.bottom)
             insets
         }
     }

@@ -155,43 +155,107 @@ class DebugDrawerView(
     private val refreshHandler = Handler(Looper.getMainLooper())
     private var autoRefresh = false
 
+    // 2026-08、ドロワーのタブ化対応。以前は全パネルを1本のScrollViewに縦に並べていたため、
+    // 項目が増えるたびに目的の設定へたどり着くまでのスクロール量が増え続けていた
+    // (履歴・ブックマーク・診断ログ・アプリ設定等、性質の異なるものが全部同じ縦一列に
+    // 並んでいた)。「ナビ」「検索/表示」「ログ」「設定」の4カテゴリのタブに分け、
+    // 1画面あたりの情報量を減らす。各タブの中身は既存のbuildXxx()をそのまま
+    // 詰め替えただけで、個々のパネルのロジック自体は変えていない。
+    private val navTabContent = LinearLayout(context).apply { orientation = VERTICAL }
+    private val viewTabContent = LinearLayout(context).apply { orientation = VERTICAL }
+    private val logTabContent = LinearLayout(context).apply { orientation = VERTICAL }
+    private val settingsTabContent = LinearLayout(context).apply { orientation = VERTICAL }
+    private val tabContents get() = listOf(navTabContent, viewTabContent, logTabContent, settingsTabContent)
+    private val tabButtons = mutableListOf<Button>()
+
     init {
         orientation = VERTICAL
         setBackgroundColor(Color.parseColor("#EE111111"))
         layoutParams = ViewGroup.LayoutParams(dp(320), ViewGroup.LayoutParams.MATCH_PARENT)
 
-        // 以前はログ部分だけがScrollView(weight=1f)で、それ以外(アドレスバー・タブ・
-        // アプリ全体設定・ベンチマーク・履歴・ブックマーク・権限一覧)は固定表示だった。
-        // パネルが増えてドロワーの高さに収まりきらなくなり、下側の項目に到達できなく
-        // なっていたため、ドロワー全体を1つのScrollViewでラップする形に変更する
-        // (ScrollViewの入れ子は挙動が不安定になりやすいので避ける)。
-        val content = LinearLayout(context).apply {
-            orientation = VERTICAL
-        }
-        content.addView(buildAddressBar())
-        tabBarView?.let {
-            content.addView(buildTabsHeader())
-            content.addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        }
-        content.addView(buildToolbar())
-        content.addView(buildGlobalSettingsPanel())
-        content.addView(buildZoomPanel())
-        content.addView(buildFindInPagePanel())
-        content.addView(buildRenderBenchmarkPanel())
-        content.addView(buildHistoryHeader())
-        content.addView(historyPanel)
-        content.addView(buildBookmarksHeader())
-        content.addView(bookmarksPanel)
-        content.addView(buildPermissionsHeader())
-        content.addView(permissionsPanel)
-        content.addView(logText)
+        // 常時表示(タブ切替の影響を受けない)固定ヘッダー部分。
+        val header = LinearLayout(context).apply { orientation = VERTICAL }
+        // 2026-08、「ファイルを差し替えても実機の挙動が変わらない」という報告への
+        // 切り分け用の一時的な目印。これが表示されていれば「このコード変更を含む
+        // ビルドが実機で動いている」ことの動かぬ証拠になる。役目を終えたら削除してよい。
+        header.addView(
+            TextView(context).apply {
+                text = "🆕 BUILD MARKER 2026-08-23-2350 🆕"
+                setTextColor(Color.parseColor("#FF00FF"))
+                setBackgroundColor(Color.parseColor("#FFFFFF00"))
+                setFixedTextSize(16f)
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(8), dp(4), dp(8))
+            },
+        )
+        header.addView(buildAddressBar())
+        header.addView(buildTabStrip())
+        addView(header)
 
+        // ナビ: タブ一覧・履歴・ブックマーク(ページ遷移に関わるもの)
+        tabBarView?.let {
+            navTabContent.addView(buildTabsHeader())
+            navTabContent.addView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        navTabContent.addView(buildHistoryHeader())
+        navTabContent.addView(historyPanel)
+        navTabContent.addView(buildBookmarksHeader())
+        navTabContent.addView(bookmarksPanel)
+
+        // 検索/表示: ページ内検索・ズーム(今見ているページの見え方に関わるもの)
+        viewTabContent.addView(buildFindInPagePanel())
+        viewTabContent.addView(buildZoomPanel())
+
+        // ログ: Behavior Audit Log・描画Tierベンチマーク(診断用)
+        logTabContent.addView(buildToolbar())
+        logTabContent.addView(logText)
+        logTabContent.addView(buildRenderBenchmarkPanel())
+
+        // 設定: アプリ全体設定・ドメイン単位の許可設定
+        settingsTabContent.addView(buildGlobalSettingsPanel())
+        settingsTabContent.addView(buildPermissionsHeader())
+        settingsTabContent.addView(permissionsPanel)
+
+        val scrollBody = LinearLayout(context).apply { orientation = VERTICAL }
+        tabContents.forEach { scrollBody.addView(it) }
         addView(
-            ScrollView(context).apply { addView(content) },
-            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+            ScrollView(context).apply { addView(scrollBody) },
+            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
         )
 
+        selectTab(0)
         refresh()
+    }
+
+    /**
+     * タブ選択バー。選択中のタブだけ背景色を変えて示す(アイコン等は使わず、
+     * 既存のsmallButton()と同じ最小限のButtonベースで統一感を保つ)。
+     */
+    private fun buildTabStrip(): LinearLayout {
+        val strip = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        listOf("ナビ", "検索/表示", "ログ", "設定").forEachIndexed { index, label ->
+            val button = Button(context).apply {
+                text = label
+                setFixedTextSize(11f)
+                setPadding(dp(2), 0, dp(2), 0)
+                layoutParams = LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { selectTab(index) }
+            }
+            tabButtons.add(button)
+            strip.addView(button)
+        }
+        return strip
+    }
+
+    private fun selectTab(index: Int) {
+        tabContents.forEachIndexed { i, panel -> panel.visibility = if (i == index) VISIBLE else GONE }
+        tabButtons.forEachIndexed { i, button ->
+            button.setBackgroundColor(if (i == index) Color.parseColor("#4A86E8") else Color.parseColor("#333333"))
+            button.setTextColor(Color.WHITE)
+        }
     }
 
     /** ドメインに依存しない、アプリ全体の設定(ユーザー起因の要求・UA・サードパーティCookie既定) */
