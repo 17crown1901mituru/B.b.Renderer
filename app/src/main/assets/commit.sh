@@ -133,3 +133,14 @@ else
     exit 0
 fi
 
+# --- watcher.py の二重起動防止 & 常駐化処理 ---
+WATCHER_SCRIPT="$REPO_DIR/app/src/main/assets/watcher.py"
+
+if [ -f "$WATCHER_SCRIPT" ]; then
+    if ! pgrep -f "python3.*watcher.py" > /dev/null; then
+        echo "Watcher process is not running. Starting watcher.py..."
+        nohup python3 "$WATCHER_SCRIPT" > ~/watcher.log 2>&1 &
+    fi
+fi
+
+
