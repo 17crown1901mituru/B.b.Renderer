@@ -10,6 +10,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -647,7 +648,16 @@ class DebugDrawerView(
         // EngineActivity側のLocalFilePickerが担い、ここではボタンを押されたことだけを
         // 伝える(このViewはActivity参照を持たない設計のため)。
         navRow.addView(smallButton("📁開く") { onOpenLocalFileRequested?.invoke() })
-        column.addView(navRow)
+        // 2026-08、ボタン最小幅を詰めても(smallButton()参照)、今後さらにボタンが
+        // 増えた時に再び同じ問題(はみ出したボタンが完全に不可視になる)が起きないよう、
+        // 念のためHorizontalScrollViewで包んでおく。はみ出した場合はクリップされず
+        // 横スクロールで見えるようになる。
+        column.addView(
+            HorizontalScrollView(context).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(navRow)
+            },
+        )
 
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -733,6 +743,14 @@ class DebugDrawerView(
             text = label
             setFixedTextSize(10f)
             setPadding(dp(4), 0, dp(4), 0)
+            // 2026-08、ボタンが5個(←→更新×中止📁開く)に増えたところ、Androidの
+            // Buttonデフォルトスタイルのminimum width(端末やテーマにもよるが概ね88dp前後)
+            // のせいで5個合計がドロワー幅(320dp)を超え、5個目(📁開く)が画面外に
+            // 押し出されて見えなくなっていた(navRow自体はHorizontalScrollViewでも
+            // 包んでいなかったため、はみ出した分は完全に不可視になっていた)。
+            // ボタン自体の最小幅を詰めて、必要な分だけの幅で並ぶようにする。
+            minWidth = 0
+            minimumWidth = 0
             setOnClickListener { onClick() }
         }
 
