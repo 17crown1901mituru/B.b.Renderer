@@ -593,6 +593,10 @@ class EngineActivity : AppCompatActivity() {
             tryEnableEs6Support(jsEngine)
             tryLoadHtmxFromAssets(jsEngine)
 
+            // 2026-08、<script src>汎用対応。詳細はJsEngine.runScriptsWithSrc()のコメント参照。
+            // 「ライブラリ読み込み→それを使うinlineコード」という一般的な書き方に対して
+            // 正しい順序になるよう、runInlineScripts()より前に呼ぶ。
+            jsEngine.runScriptsWithSrc(root, url)
             jsEngine.runInlineScripts(root)
 
             TabSession(

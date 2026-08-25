@@ -403,6 +403,71 @@ class JsEngine(
         }
     }
 
+    /**
+     * 2026-08、<script src="...">タグの汎用読み込み対応。以前はsrc属性を持つ<script>を
+     * 完全にスキップしており(runInlineScripts()参照)、ページがjQuery等のライブラリを
+     * <script src>で読み込もうとしても一切実行されなかった(htmx.js/babel.min.jsだけは
+     * EngineActivity.tryLoadHtmxFromAssets()等で個別に特別扱いされていたため動いていたが、
+     * 他のライブラリは何であれ動かなかった)。これを一般化し、src属性を持つ<script>も
+     * (ローカルfile://・リモートhttp(s)://いずれも)取得して実行できるようにする。
+     *
+     * 呼び出し順について: EngineActivity側でrunInlineScripts()より前にこちらを呼ぶことで、
+     * 「<script src="jquery.js">の後にそれを使うinline <script>が続く」という最も一般的な
+     * 実際のページの書き方(ライブラリ読み込み→それを使うコード、という順)に対して
+     * 正しい実行順になる。ただし実ブラウザのようなDOM出現順そのままの厳密な混在実行
+     * ではない(inline/src二種類を別々のパスとして一括処理しているだけ)——src<script>の
+     * 直後に別のinline<script>が挟まり、さらにその後にまたsrc<script>が続く、といった
+     * 複雑な混在パターンでは実行順がズレ得る点は既知の制約。
+     *
+     * @param baseUrl 相対パスのsrc(例: "/js/app.js")を解決するための基準URL
+     *   (通常は現在のページのURL、window.location.hrefと同じ値を渡す想定)。
+     * 既知の制約: content://スキーム(SAFピッカーで選んだページ)からの相対src解決は
+     *   非対応(content:// URIはfile://と違いプロバイダ固有の不透明なIDのため、相対
+     *   パス解決の概念自体が成立しない。EngineActivity.readContentUri()と同じ制約)。
+     *   絶対URL(https://...)のscript src、またはfile://で自己完結したページであれば
+     *   この制約を受けない。
+     */
+    fun runScriptsWithSrc(root: Element, baseUrl: String) {
+        val scripts = root.findAll { it.tag == "script" && it.attributes.containsKey("src") }
+        scripts.forEachIndexed { index, scriptElement ->
+            val src = scriptElement.attributes["src"] ?: return@forEachIndexed
+            val absoluteUrl = resolveScriptUrl(baseUrl, src)
+            val code = fetchScriptSource(absoluteUrl)
+            if (code == null) {
+                com.B.b.Renderer.debug.BehaviorAuditLog.record(
+                    com.B.b.Renderer.debug.BehaviorAuditLog.Category.JS_EVAL,
+                    "script src fetch failed: $absoluteUrl",
+                )
+                return@forEachIndexed
+            }
+            if (code.isNotBlank()) {
+                evaluate(code, sourceName = "src-script-$index($absoluteUrl)")
+            }
+        }
+    }
+
+    // EngineActivity.resolveUrl()と同じロジック(1行のみのため、このためだけに共有
+    // ユーティリティファイルを作る方が「不要な抽象化レイヤーを増やさない」という
+    // プロジェクト方針に反すると判断し、あえて重複させている)。
+    private fun resolveScriptUrl(baseUrl: String, src: String): String =
+        runCatching { java.net.URI(baseUrl).resolve(src).toString() }.getOrDefault(src)
+
+    /**
+     * file://はEngineActivity.readLocalFile()と同じ理由でjava.io.File経由、
+     * それ以外(http/https)はokHttpClient経由で取得する。content://は非対応
+     * (このクラスがContentResolverを持たないため。クラス冒頭コメント参照)。
+     * 取得失敗時はnullを返す(呼び出し元でログに記録し、そのscriptだけスキップする)。
+     */
+    private fun fetchScriptSource(url: String): String? = runCatching {
+        if (url.startsWith("file://", ignoreCase = true)) {
+            val path = java.net.URI(url).path ?: return null
+            java.io.File(path).readText()
+        } else {
+            val request = okhttp3.Request.Builder().url(url).build()
+            okHttpClient.newCall(request).execute().body?.string()
+        }
+    }.getOrNull()
+
     fun dispose() {
         window.cancelAll()
     }
