@@ -110,6 +110,28 @@ class BrowserCapabilityBridge(
         activity.runOnUiThread { activity.requestedOrientation = orientation }
     }
 
+    // --- navigator.clipboard ---
+    //
+    // 実際のAndroidクリップボードへの書き込み・コピー履歴(ClipboardHistoryStore)への
+    // 保存は、util.ClipboardHelper/data.ClipboardHistoryStoreというこのクラスから見て
+    // 別レイヤー(permissions配下からdata/util配下への依存は作らない方針)にあるため、
+    // 直接は呼ばず、EngineActivity側でセットしてもらうコールバック経由で委譲する
+    // (JsWindow.onOpenPopupと同じ役割分担)。
+
+    var onClipboardWriteRequested: ((String) -> Unit)? = null
+
+    /**
+     * navigator.clipboard.writeText()相当。SitePermissions.CLIPBOARD_WRITE(既定不許可)を
+     * 許可しているドメインのページJSからのみ、実際にクリップボードへ書き込む。
+     * @return 実際に書き込みを行った(=許可されていた)ならtrue。JsClipboard側はこの
+     *   真偽値をもとに簡易Promise(JsThenable)のresolve/rejectを振り分ける。
+     */
+    fun writeClipboardText(domain: String, text: String): Boolean {
+        if (!sitePermissions.isAllowed(domain, SitePermissions.Capability.CLIPBOARD_WRITE)) return false
+        onClipboardWriteRequested?.invoke(text)
+        return true
+    }
+
     private fun getVibrator(): Vibrator? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val manager = activity.getSystemService(Activity.VIBRATOR_MANAGER_SERVICE) as? VibratorManager

@@ -7,6 +7,8 @@ import android.view.MotionEvent
 import android.view.View
 import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.input.RadioGroupController
+import com.B.b.Renderer.input.TextSelectionGestureHelper
+import com.B.b.Renderer.input.TextSelectionState
 import com.B.b.Renderer.input.TouchInputController
 import com.B.b.Renderer.input.TouchPhase
 import com.B.b.Renderer.input.ZoomGestureHelper
@@ -24,10 +26,26 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
     private var layoutEngine: LayoutEngine? = null
     private var touchController: TouchInputController? = null
     private val zoomGesture = ZoomGestureHelper(context) { layoutEngine }
+
+    // 2026-08、画面長押しでのテキスト範囲選択。zoomGestureと同じく、Viewの生存期間中
+    // 1つだけ生成し、参照するlayoutEngineはタブ切替のたびにこのvarフィールド経由で
+    // 自動的に最新のものへ切り替わる(ZoomGestureHelperと同じ設計)。
+    private val textSelectionGesture = TextSelectionGestureHelper(
+        context = context,
+        rootProvider = { layoutEngine?.root },
+        layoutEngineProvider = { layoutEngine },
+        onSelectionChanged = { onTextSelectionChanged?.invoke(); postInvalidate() },
+    )
+
     override var onHtmxTrigger: ((Element) -> Unit)? = null
     override var onNavigate: ((String) -> Unit)? = null
+    override var onTextSelectionChanged: (() -> Unit)? = null
+    override val textSelectionState: TextSelectionState get() = textSelectionGesture.state
 
     override fun attach(engine: LayoutEngine) {
+        // タブ切替時、古いroot/Elementを参照したままの選択状態を持ち越さない。
+        textSelectionGesture.clearSelection()
+
         layoutEngine = engine
         val radioGroupController = RadioGroupController()
         touchController = TouchInputController(
@@ -68,6 +86,10 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
         postInvalidate()
     }
 
+    override fun selectedText(): String = textSelectionGesture.selectedText()
+
+    override fun clearTextSelection() = textSelectionGesture.clearSelection()
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val engine = layoutEngine ?: return
@@ -83,6 +105,20 @@ class EngineView(context: Context, attrs: AttributeSet? = null) :
             postInvalidate()
             return true
         }
+
+        // 2026-08、長押しテキスト選択。選択が今まさに始まった(=直前まで非選択、今回で
+        // 選択中に切り替わった)場合、既にTouchInputController側にも同じDOWN/MOVEが
+        // 流れてタップ/ドラッグ候補として追跡され始めている可能性があるため、CANCELを
+        // 送って誤タップ・誤スクロール判定を防ぐ。
+        val wasSelectionActive = textSelectionGesture.isSelectionActive
+        if (textSelectionGesture.onTouchEvent(event)) {
+            if (!wasSelectionActive && textSelectionGesture.isSelectionActive) {
+                touchController?.onTouchEvent(TouchPhase.CANCEL, event.x, event.y)
+            }
+            postInvalidate()
+            return true
+        }
+
         val controller = touchController ?: return super.onTouchEvent(event)
         val phase = when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> TouchPhase.DOWN

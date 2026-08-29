@@ -145,6 +145,7 @@ class JsNavigator(
     private val currentUrl: () -> String,
 ) {
     val geolocation = JsGeolocation(bridge, currentUrl)
+    val clipboard = JsClipboard(bridge, currentUrl)
 
     fun vibrate(pattern: Any?): Boolean {
         val b = bridge ?: return false
@@ -186,6 +187,68 @@ class JsWakeLock(
     fun request(type: String = "screen"): Boolean = bridge?.requestWakeLock(domainOf(currentUrl())) ?: false
     fun release() { bridge?.releaseWakeLock() }
     private fun domainOf(url: String) = url.toHttpDomainOrEmpty()
+}
+
+/**
+ * navigator.clipboard.writeText()相当。実ページでよく見る
+ * `navigator.clipboard.writeText(text).then(() => {...})` という書き方がそのまま
+ * 動くように、戻り値は真偽値ではなくJsThenable(簡易Promise代替、下記参照)にしている。
+ *
+ * サイト単位の許可(SitePermissions.CLIPBOARD_WRITE、既定不許可)は
+ * BrowserCapabilityBridge側で見ており、未許可の場合はJsThenableのreject相当
+ * (.then()の第2引数、または.catch())が呼ばれる。
+ */
+class JsClipboard(
+    private val bridge: BrowserCapabilityBridge?,
+    private val currentUrl: () -> String,
+) {
+    fun writeText(text: String?): JsThenable {
+        val b = bridge ?: return JsThenable(succeeded = false, errorMessage = "clipboard unavailable")
+        val domain = currentUrl().toHttpDomainOrEmpty()
+        val wrote = b.writeClipboardText(domain, text ?: "")
+        return if (wrote) {
+            JsThenable(succeeded = true)
+        } else {
+            JsThenable(succeeded = false, errorMessage = "clipboard permission denied (site setting)")
+        }
+    }
+}
+
+/**
+ * 簡易Promise代替。
+ *
+ * 【意図的な割り切り】真のPromise(マイクロタスクキュー、複数then()チェーンの非同期解決、
+ * Promise.all等)は実装しない(README「引き算の設計」方針、かつRhinoのバージョンにより
+ * ネイティブPromiseの有無が変わるリスクを避けるため)。navigator.clipboard.writeText()の
+ * ように「結果は同期的にすぐ確定しており、ページ側は.then()/.catch()を1回チェーンする
+ * だけ」という頻出パターンのためだけの最小限の実装であり、resolve/rejectは
+ * コンストラクタ時点で既に確定している(then()を呼ぶまで実処理を遅延させたりはしない)。
+ * 他のAPIへ流用する場合はこの前提(同期的に結果が決まっている)を満たすことを確認すること。
+ */
+class JsThenable(private val succeeded: Boolean, private val errorMessage: String = "") {
+
+    /** Promise.then(onFulfilled, onRejected)相当。戻り値のthisをそのまま返すのでcatch()をさらに繋げられる。 */
+    fun then(onFulfilled: Function?, onRejected: Function? = null): JsThenable {
+        val callback = if (succeeded) onFulfilled else onRejected
+        callback ?: return this
+        val ctx = Context.enter()
+        try {
+            val scope = ScriptableObject.getTopLevelScope(callback)
+            if (succeeded) {
+                callback.call(ctx, scope, scope, emptyArray())
+            } else {
+                val errorObject = ctx.newObject(scope)
+                ScriptableObject.putProperty(errorObject, "message", errorMessage)
+                callback.call(ctx, scope, scope, arrayOf(errorObject))
+            }
+        } finally {
+            Context.exit()
+        }
+        return this
+    }
+
+    /** Promise.catch(onRejected)相当。then(null, onRejected)と同じ経路を通すだけ。 */
+    fun `catch`(onRejected: Function?): JsThenable = then(null, onRejected)
 }
 
 private fun String.toHttpDomainOrEmpty(): String =

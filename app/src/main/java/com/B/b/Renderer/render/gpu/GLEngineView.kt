@@ -6,6 +6,8 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import com.B.b.Renderer.core.Element
 import com.B.b.Renderer.input.RadioGroupController
+import com.B.b.Renderer.input.TextSelectionGestureHelper
+import com.B.b.Renderer.input.TextSelectionState
 import com.B.b.Renderer.input.TouchInputController
 import com.B.b.Renderer.input.TouchPhase
 import com.B.b.Renderer.input.ZoomGestureHelper
@@ -20,8 +22,23 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
     private var touchController: TouchInputController? = null
     private var layoutEngine: LayoutEngine? = null
     private val zoomGesture = ZoomGestureHelper(context) { layoutEngine }
+
+    // 2026-08、画面長押しでのテキスト範囲選択。GPU描画パイプライン(GLEngineRenderer)側には
+    // 一切手を入れず、ハイライト矩形の実際の描画はEngineFrameLayout.selectionOverlayView
+    // (通常のCanvas View、GLSurfaceViewの上に重ねて表示)側に任せる設計にしている
+    // (README記載の「役割の明確な分離」方針に合わせ、Rhino/GL等の重いレイヤーには
+    // 触れず、Android標準Viewの重ね合わせだけで完結させる)。
+    private val textSelectionGesture = TextSelectionGestureHelper(
+        context = context,
+        rootProvider = { layoutEngine?.root },
+        layoutEngineProvider = { layoutEngine },
+        onSelectionChanged = { onTextSelectionChanged?.invoke(); requestRender() },
+    )
+
     override var onHtmxTrigger: ((Element) -> Unit)? = null
     override var onNavigate: ((String) -> Unit)? = null
+    override var onTextSelectionChanged: (() -> Unit)? = null
+    override val textSelectionState: TextSelectionState get() = textSelectionGesture.state
 
     init {
         setEGLContextClientVersion(3)
@@ -38,6 +55,9 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
             com.B.b.Renderer.debug.BehaviorAuditLog.Category.RENDER_DIAG,
             "GLEngineView.attach() called",
         )
+
+        // タブ切替時、古いroot/Elementを参照したままの選択状態を持ち越さない。
+        textSelectionGesture.clearSelection()
 
         layoutEngine = engine
         val existingRenderer = glRenderer
@@ -125,11 +145,28 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
         post { requestRender() }
     }
 
+    override fun selectedText(): String = textSelectionGesture.selectedText()
+
+    override fun clearTextSelection() = textSelectionGesture.clearSelection()
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (zoomGesture.onTouchEvent(event)) {
             requestRender()
             return true
         }
+
+        // 2026-08、長押しテキスト選択。EngineView(Canvas版)と同じ考え方で、選択が
+        // 今まさに始まった瞬間だけTouchInputControllerへCANCELを送り、誤タップ・
+        // 誤スクロール判定を防ぐ。
+        val wasSelectionActive = textSelectionGesture.isSelectionActive
+        if (textSelectionGesture.onTouchEvent(event)) {
+            if (!wasSelectionActive && textSelectionGesture.isSelectionActive) {
+                touchController?.onTouchEvent(TouchPhase.CANCEL, event.x, event.y)
+            }
+            requestRender()
+            return true
+        }
+
         val controller = touchController ?: return super.onTouchEvent(event)
         val phase = when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> TouchPhase.DOWN

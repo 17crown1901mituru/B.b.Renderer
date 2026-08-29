@@ -15,6 +15,7 @@ import com.B.b.Renderer.core.HtmlFragmentParser
 import com.B.b.Renderer.core.ImageElement
 import com.B.b.Renderer.core.ImageLoadState
 import com.B.b.Renderer.data.BookmarkStore
+import com.B.b.Renderer.data.ClipboardHistoryStore
 import com.B.b.Renderer.data.HistoryStore
 import com.B.b.Renderer.debug.BehaviorAuditLog
 import com.B.b.Renderer.debug.DebugDrawerView
@@ -41,6 +42,7 @@ import com.B.b.Renderer.tabs.TabBarView
 import com.B.b.Renderer.tabs.TabManager
 import com.B.b.Renderer.tabs.TabSession
 import com.B.b.Renderer.thermal.ThermalGuard
+import com.B.b.Renderer.util.ClipboardHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -85,6 +87,8 @@ class EngineActivity : AppCompatActivity() {
     private val thermalGuard by lazy { ThermalGuard(this) }
     private val historyStore by lazy { HistoryStore(this) }
     private val bookmarkStore by lazy { BookmarkStore(this) }
+    // 2026-08、画面長押しテキスト選択→コピーの履歴(最大100件)。
+    private val clipboardHistoryStore by lazy { ClipboardHistoryStore(this) }
     // registerForActivityResult()はSTARTEDになる前に呼ぶ必要があるため、他のフィールドと違い
     // by lazyにはしない(初回参照タイミングが遅れて登録できなくなる可能性があるため)。
     private val permissionManager = RuntimePermissionManager(this)
@@ -139,6 +143,30 @@ class EngineActivity : AppCompatActivity() {
         engineFrame = EngineFrameLayout(this, engineViewRoot)
         engineFrame.addressBarView.onSubmit = { url -> navigateForegroundTo(url) }
 
+        // 2026-08、画面長押しテキスト選択→コピー。「コピー」バーのタップで実際に
+        // Androidクリップボードへ書き込み(ClipboardHelper)、かつコピー履歴へも保存する
+        // (ドロワー「クリップボード」タブから後から見返せるようにするため)。
+        // クリップボード/コピー履歴どちらへの書き込みも、EngineView/GLEngineView自身は
+        // 一切行わない(役割分担はonHtmxTrigger等と同じ、選択状態の検知まではView側、
+        // 実際の永続化・OS連携はActivity側)。
+        engineFrame.onCopyTapped = {
+            val text = engineHost.selectedText()
+            if (text.isNotBlank()) {
+                ClipboardHelper.copyToClipboard(this, text)
+                clipboardHistoryStore.add(text)
+            }
+            engineHost.clearTextSelection()
+        }
+        engineFrame.onCancelSelectionTapped = { engineHost.clearTextSelection() }
+
+        // 2026-08、navigator.clipboard.writeText()対応。許可判定(SitePermissions.CLIPBOARD_WRITE)
+        // 自体はBrowserCapabilityBridge側で既に済んでいる状態でこのコールバックが呼ばれるため、
+        // ここでは長押し選択コピー(直上のengineFrame.onCopyTapped)と全く同じ2処理を行うだけでよい。
+        capabilityBridge.onClipboardWriteRequested = { text ->
+            ClipboardHelper.copyToClipboard(this, text)
+            clipboardHistoryStore.add(text)
+        }
+
         tabBarView = TabBarView(this, tabManager, onTabChanged = {}).apply {
             onTabSelected = { id -> switchToTab(id) }
             onNewTabRequested = { openNewTab(DEFAULT_URL) }
@@ -153,6 +181,8 @@ class EngineActivity : AppCompatActivity() {
             globalSettings = globalSettings,
             historyStore = historyStore,
             bookmarkStore = bookmarkStore,
+            clipboardHistoryStore = clipboardHistoryStore,
+            onCopyFromHistoryRequested = { text -> ClipboardHelper.copyToClipboard(this, text) },
             currentDomainProvider = { sitePermissions.domainOf(currentPageUrl) },
             onGlobalSettingsChanged = {
                 if (globalSettings.userKeepScreenOn) {
@@ -392,6 +422,17 @@ class EngineActivity : AppCompatActivity() {
         // (=このラムダごと新しいsession.urlの値で差し替えられるため)、常にそのタブの
         // 「今開いているページ」を基準にhrefが解決される。
         engineHost.onNavigate = { href -> navigateForegroundTo(resolveUrl(session.url, href)) }
+        // 2026-08、画面長押しテキスト選択。ハイライトの再描画・コピーバーの表示/非表示は
+        // EngineFrameLayout側に一任し、ここでは「今どのタブのzoom/scrollYを基準に
+        // 座標変換すればよいか」を都度渡すだけにする(タブ切替のたびにsession.layoutEngineの
+        // 参照先が変わるため、onHtmxTrigger/onNavigateと同様にここで毎回差し替える)。
+        engineHost.onTextSelectionChanged = {
+            engineFrame.updateSelectionOverlay(
+                engineHost.textSelectionState,
+                session.layoutEngine.zoomScale,
+                session.layoutEngine.scrollY,
+            )
+        }
         currentPageUrl = session.url
         engineFrame.addressBarView.setUrl(session.url)
         recordHistoryVisit(session.url, session.title)

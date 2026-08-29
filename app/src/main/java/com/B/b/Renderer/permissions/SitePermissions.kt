@@ -16,7 +16,13 @@ import java.net.URI
  */
 class SitePermissions(context: Context) {
 
-    enum class Capability { VIBRATE, WAKE_LOCK, ORIENTATION_LOCK, THIRD_PARTY_COOKIES, GEOLOCATION, POPUPS }
+    // 2026-08、navigator.clipboard.writeText()対応でCLIPBOARD_WRITEを追加。ページが
+    // ユーザーの気付かないうちにクリップボードを書き換えられてしまう(=別の場所に
+    // 貼り付けた際に意図しない内容が入る)リスクがあるvibrate/popups等と同種の機能のため、
+    // 同じ「既定不許可・ドメイン単位」のモデルに乗せる。ユーザー自身の長押し選択
+    // →コピー操作(EngineActivity.onCopyTapped)はこの許可設定と無関係に常に使える
+    // (あくまでページ側JSからの自動書き込みだけを許可制にしている)。
+    enum class Capability { VIBRATE, WAKE_LOCK, ORIENTATION_LOCK, THIRD_PARTY_COOKIES, GEOLOCATION, POPUPS, CLIPBOARD_WRITE }
 
     private val prefs = context.getSharedPreferences("site_permissions", Context.MODE_PRIVATE)
 

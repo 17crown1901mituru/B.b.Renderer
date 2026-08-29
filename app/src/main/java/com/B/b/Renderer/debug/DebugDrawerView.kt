@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.text.format.DateUtils
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.ViewGroup
@@ -16,6 +17,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.B.b.Renderer.benchmark.RenderTierBenchmark
 import com.B.b.Renderer.data.BookmarkStore
+import com.B.b.Renderer.data.ClipboardHistoryStore
 import com.B.b.Renderer.data.HistoryStore
 import com.B.b.Renderer.permissions.GlobalAppSettings
 import com.B.b.Renderer.permissions.SitePermissions
@@ -45,9 +47,9 @@ private fun TextView.setFixedTextSize(spValue: Float) {
 
 /**
  * BehaviorAuditLogをその場で見るためのデバッグ用サイドパネル。
- * 加えて、タブ一覧・ドメイン単位のブラウザ機能許可・アプリ全体設定・履歴・ブックマークも
- * ここに集約する(2026-07議論分: ブラウザとしての機能・設定はドロワー側に寄せて、
- * ページ描画領域を画面いっぱいに使えるようにする方針)。
+ * 加えて、タブ一覧・ドメイン単位のブラウザ機能許可・アプリ全体設定・履歴・ブックマーク・
+ * コピー履歴も ここに集約する(2026-07議論分: ブラウザとしての機能・設定はドロワー側に
+ * 寄せて、ページ描画領域を画面いっぱいに使えるようにする方針)。
  *
  * 画面上にEngineView(ページ描画)・ソフトウェアキーボード・デバッグ表示が
  * 同時に重なるとごちゃつくため、常時表示ではなくDrawerLayoutで画面端に
@@ -63,6 +65,12 @@ class DebugDrawerView(
     private val globalSettings: GlobalAppSettings? = null,
     private val historyStore: HistoryStore? = null,
     private val bookmarkStore: BookmarkStore? = null,
+    // 2026-08、画面長押しテキスト選択→コピーの履歴一覧用。実際のAndroidクリップボードへの
+    // 書き込みはこのView自身では行わず(util.ClipboardHelperはこのモジュールから見えない
+    // 層のため)、onCopyFromHistoryRequested経由でActivity側に委譲する
+    // (onNavigateRequested等、既存のコールバック委譲パターンと同じ役割分担)。
+    private val clipboardHistoryStore: ClipboardHistoryStore? = null,
+    private val onCopyFromHistoryRequested: ((String) -> Unit)? = null,
     private val currentDomainProvider: (() -> String)? = null,
     private val onGlobalSettingsChanged: (() -> Unit)? = null,
     private val onNavigateRequested: ((String) -> Unit)? = null,
@@ -113,6 +121,30 @@ class DebugDrawerView(
         visibility = GONE
     }
 
+    /** クリップボード履歴の一覧表示エリア。履歴/ブックマークと違い既定で表示しておく(件数を確認しやすくするため)。 */
+    private val clipboardPanel = LinearLayout(context).apply {
+        orientation = VERTICAL
+        setPadding(dp(12), dp(4), dp(12), dp(4))
+    }
+
+    /**
+     * 2026-08、「このタブを一時的な保存領域としても使いたい」という要望への対応。
+     * ページからの長押しコピー/navigator.clipboard.writeText()経由の自動保存だけでなく、
+     * ここに直接タイプ(またはOS標準のペースト操作で貼り付け)して「保存」を押せば、
+     * 同じコピー履歴ストアに1件追加される。複数行のメモ的な使い方も想定し、
+     * 単一行(isSingleLine)には制限していない。
+     */
+    private val clipboardInput = EditText(context).apply {
+        hint = "テキストを入力(または貼り付け)して保存…"
+        setTextColor(Color.WHITE)
+        setHintTextColor(Color.GRAY)
+        setFixedTextSize(12f)
+        minLines = 2
+        maxLines = 4
+        setBackgroundColor(Color.parseColor("#333333"))
+        setPadding(dp(8), dp(6), dp(8), dp(6))
+    }
+
     private val findQueryInput = EditText(context).apply {
         hint = "ページ内検索"
         setTextColor(Color.WHITE)
@@ -159,14 +191,16 @@ class DebugDrawerView(
     // 2026-08、ドロワーのタブ化対応。以前は全パネルを1本のScrollViewに縦に並べていたため、
     // 項目が増えるたびに目的の設定へたどり着くまでのスクロール量が増え続けていた
     // (履歴・ブックマーク・診断ログ・アプリ設定等、性質の異なるものが全部同じ縦一列に
-    // 並んでいた)。「ナビ」「検索/表示」「ログ」「設定」の4カテゴリのタブに分け、
-    // 1画面あたりの情報量を減らす。各タブの中身は既存のbuildXxx()をそのまま
-    // 詰め替えただけで、個々のパネルのロジック自体は変えていない。
+    // 並んでいた)。「ナビ」「検索/表示」「クリップボード」「ログ」「設定」の5カテゴリの
+    // タブに分け、1画面あたりの情報量を減らす。各タブの中身は既存のbuildXxx()をそのまま
+    // 詰め替えただけで、個々のパネルのロジック自体は変えていない
+    // (2026-08、コピー履歴機能追加にあわせて「クリップボード」タブを新設)。
     private val navTabContent = LinearLayout(context).apply { orientation = VERTICAL }
     private val viewTabContent = LinearLayout(context).apply { orientation = VERTICAL }
+    private val clipboardTabContent = LinearLayout(context).apply { orientation = VERTICAL }
     private val logTabContent = LinearLayout(context).apply { orientation = VERTICAL }
     private val settingsTabContent = LinearLayout(context).apply { orientation = VERTICAL }
-    private val tabContents get() = listOf(navTabContent, viewTabContent, logTabContent, settingsTabContent)
+    private val tabContents get() = listOf(navTabContent, viewTabContent, clipboardTabContent, logTabContent, settingsTabContent)
     private val tabButtons = mutableListOf<Button>()
 
     init {
@@ -207,6 +241,12 @@ class DebugDrawerView(
         viewTabContent.addView(buildFindInPagePanel())
         viewTabContent.addView(buildZoomPanel())
 
+        // クリップボード: 画面長押しでコピーしたテキストの履歴(最大100件)。
+        // 一時的な保存領域(スクラッチパッド)としても使えるよう、手入力での保存欄も持つ。
+        clipboardTabContent.addView(buildClipboardInputPanel())
+        clipboardTabContent.addView(buildClipboardHeader())
+        clipboardTabContent.addView(clipboardPanel)
+
         // ログ: Behavior Audit Log・描画Tierベンチマーク(診断用)
         logTabContent.addView(buildToolbar())
         logTabContent.addView(logText)
@@ -237,7 +277,7 @@ class DebugDrawerView(
             orientation = HORIZONTAL
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
-        listOf("ナビ", "検索/表示", "ログ", "設定").forEachIndexed { index, label ->
+        listOf("ナビ", "検索/表示", "クリップボード", "ログ", "設定").forEachIndexed { index, label ->
             val button = Button(context).apply {
                 text = label
                 setFixedTextSize(11f)
@@ -553,7 +593,129 @@ class DebugDrawerView(
         }
     }
 
-    /** 履歴・ブックマーク共通の1行分の見た目: タップで遷移、×で削除。 */
+    /**
+     * このタブを「コピー履歴の確認場所」だけでなく「ちょっとしたメモの一時保存領域」
+     * としても使えるようにするための入力欄。保存はAndroidクリップボードへは書き込まず
+     * (=OS全体のクリップボードを不用意に上書きしない)、コピー履歴ストアに1件足すだけに
+     * している。後からOSクリップボードへ移したい時は、保存後に一覧側の行をタップすればよい
+     * (buildClipboardRowのonTap = onCopyFromHistoryRequested)。
+     */
+    private fun buildClipboardInputPanel(): LinearLayout {
+        val column = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(4))
+        }
+        column.addView(
+            TextView(context).apply {
+                text = "一時保存(メモ帳代わり)"
+                setTextColor(Color.LTGRAY)
+                setFixedTextSize(12f)
+            },
+        )
+        column.addView(clipboardInput)
+        column.addView(
+            smallButton("保存") {
+                val text = clipboardInput.text.toString()
+                if (text.isNotBlank()) {
+                    clipboardHistoryStore?.add(text)
+                    clipboardInput.setText("")
+                    refreshClipboardHistory()
+                }
+            },
+        )
+        return column
+    }
+
+    /**
+     * クリップボード履歴のヘッダー行。件数表示は特に持たず、履歴/ブックマークと同じ
+     * 「見出し＋全削除」の構成に合わせる(このタブ自体が「クリップボード」専用タブの
+     * ため、表示/非表示トグルは不要で既定で開いたままにしている)。
+     */
+    private fun buildClipboardHeader(): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(0))
+        }
+        row.addView(
+            TextView(context).apply {
+                text = "コピー履歴(最大${ClipboardHistoryStore.MAX_ENTRIES}件)"
+                setTextColor(Color.LTGRAY)
+                setFixedTextSize(12f)
+                layoutParams = LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        row.addView(smallButton("全削除") { clipboardHistoryStore?.clearAll(); refreshClipboardHistory() })
+        return row
+    }
+
+    private fun refreshClipboardHistory() {
+        clipboardPanel.removeAllViews()
+        val store = clipboardHistoryStore ?: return
+        val entries = store.recent()
+        if (entries.isEmpty()) {
+            clipboardPanel.addView(
+                TextView(context).apply {
+                    text = "(コピー履歴なし。ページ内の文字を長押しして範囲選択→コピーすると、ここに溜まっていきます)"
+                    setTextColor(Color.GRAY)
+                    setFixedTextSize(11f)
+                },
+            )
+            return
+        }
+        entries.forEach { entry ->
+            clipboardPanel.addView(
+                buildClipboardRow(
+                    text = entry.text,
+                    copiedAt = entry.copiedAt,
+                    onTap = { onCopyFromHistoryRequested?.invoke(entry.text) },
+                    onDelete = { store.delete(entry.id); refreshClipboardHistory() },
+                ),
+            )
+        }
+    }
+
+    /**
+     * コピー履歴1件分の見た目: タップで(Androidクリップボードへ)再コピー、×で履歴から削除。
+     * 履歴/ブックマークのbuildListRow()と違い、2行目はURLではなく相対時刻表示にしている。
+     */
+    private fun buildClipboardRow(text: String, copiedAt: Long, onTap: () -> Unit, onDelete: () -> Unit): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        val textColumn = LinearLayout(context).apply {
+            orientation = VERTICAL
+            layoutParams = LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { onTap() }
+        }
+        textColumn.addView(
+            TextView(context).apply {
+                this.text = text
+                setTextColor(Color.WHITE)
+                setFixedTextSize(12f)
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            },
+        )
+        textColumn.addView(
+            TextView(context).apply {
+                this.text = DateUtils.getRelativeTimeSpanString(
+                    copiedAt,
+                    System.currentTimeMillis(),
+                    DateUtils.MINUTE_IN_MILLIS,
+                )
+                setTextColor(Color.GRAY)
+                setFixedTextSize(10f)
+            },
+        )
+        row.addView(textColumn)
+        row.addView(smallButton("×") { onDelete() })
+        return row
+    }
+
+    /** 履歴・ブックマーク一覧、1行分の見た目(タイトル+URL、×で削除)。 */
     private fun buildListRow(title: String, url: String, onTap: () -> Unit, onDelete: () -> Unit): LinearLayout {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -762,6 +924,7 @@ class DebugDrawerView(
         refreshBookmarkStar()
         refreshZoomStatus()
         refreshFindStatus()
+        refreshClipboardHistory()
         tabBarView?.refresh()
         if (!addressBarInput.isFocused) {
             currentUrlProvider?.invoke()?.let { addressBarInput.setText(it) }

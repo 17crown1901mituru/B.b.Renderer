@@ -6,12 +6,14 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.drawerlayout.widget.DrawerLayout
+import com.B.b.Renderer.input.TextSelectionState
 
 /**
  * sp(=density×fontScale)ではなく、density基準の固定pxでテキストサイズを指定する。
@@ -30,8 +32,8 @@ private fun TextView.setFixedTextSize(spValue: Float) {
  *     一切持たない(それはEngineActivity側の責務のまま)。
  *   - ページ内DOM(<div>や<h1>等)のbox model計算はlayout/LayoutEngine.ktが担当する、
  *     全く別のレイヤー。このクラスは「Androidのネイティブ画面部品(アドレスバー・
- *     PiP枠・ローディング表示・ドロワー)をどこに置くか」だけを扱う
- *     (2026-07、EngineActivity肥大化への対応として切り出し。命名時、
+ *     PiP枠・ローディング表示・ドロワー・選択ハイライト/コピーバー)をどこに置くか」
+ *     だけを扱う(2026-07、EngineActivity肥大化への対応として切り出し。命名時、
  *     Google Chromeを連想させないよう「chrome」という語は避けた)。
  *
  * 使い方(EngineActivity側):
@@ -41,7 +43,10 @@ private fun TextView.setFixedTextSize(spValue: Float) {
  *      pipContainerを直接操作する
  *   3. ドロワー(DebugDrawerView等)は別途Activity側で組み立て、
  *      attachEndDrawer(...)でこのクラスに差し込む
- *   4. setContentView(このインスタンス) を呼ぶ(DrawerLayoutを継承しているため
+ *   4. テキスト選択中は、engineHost.onTextSelectionChangedからupdateSelectionOverlay()を
+ *      呼んでもらう(選択ハイライトの再描画・コピーバーの表示/非表示を行う)。
+ *      onCopyTapped/onCancelSelectionTappedにコピー確定・選択解除のコールバックを設定すること。
+ *   5. setContentView(このインスタンス) を呼ぶ(DrawerLayoutを継承しているため
  *      そのままcontentViewにできる)
  */
 class EngineFrameLayout(
@@ -71,14 +76,63 @@ class EngineFrameLayout(
         setBackgroundColor(Color.parseColor("#88000000"))
     }
 
+    /**
+     * 2026-08、画面長押しでのテキスト範囲選択用。contentView(EngineView/GLEngineView)の
+     * さらに上に重ねる透過View。EngineHostView.textSelectionStateの内容をそのまま
+     * 描画するだけで、タッチ自体は受けない(SelectionOverlayView参照)。
+     */
+    val selectionOverlayView: SelectionOverlayView = SelectionOverlayView(context)
+
+    /**
+     * 2026-08、選択中だけ画面下部に出す「コピー/キャンセル」バー。実際のブラウザにある
+     * 「選択位置の直上に浮くフローティングツールバー」までは今回は見送り、位置計算を
+     * 単純化するため画面下固定にしている(EngineFrameLayout.kt既存コメントの
+     * 「ドラッグで自由配置するフローティングボタン化は今回は見送り」と同じ判断)。
+     */
+    private val selectionActionBar: LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setBackgroundColor(Color.parseColor("#EE222222"))
+        visibility = View.GONE
+    }
+
+    private val copyButton: Button = Button(context).apply {
+        text = "📋 コピー"
+    }
+
+    private val cancelSelectionButton: Button = Button(context).apply {
+        text = "×"
+    }
+
+    /** コピー確定がタップされた時のコールバック。選択中テキストの取得・保存は呼び出し元(Activity)の責務。 */
+    var onCopyTapped: (() -> Unit)? = null
+
+    /** 選択キャンセル(×)がタップされた時のコールバック。 */
+    var onCancelSelectionTapped: (() -> Unit)? = null
+
     private val mainContainer: FrameLayout = FrameLayout(context)
 
     init {
         drawerToggleButton.setPadding(dp(10), dp(6), dp(10), dp(6))
         drawerToggleButton.setOnClickListener { toggleEndDrawer() }
 
+        copyButton.setOnClickListener { onCopyTapped?.invoke() }
+        cancelSelectionButton.setOnClickListener { onCancelSelectionTapped?.invoke() }
+        selectionActionBar.addView(
+            copyButton,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+        selectionActionBar.addView(
+            cancelSelectionButton,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+
         mainContainer.apply {
             addView(contentView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(
+                selectionOverlayView,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+            )
             addView(
                 addressBarView,
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -98,6 +152,13 @@ class EngineFrameLayout(
                 },
             )
             addView(
+                selectionActionBar,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    setMargins(0, 0, 0, dp(16))
+                },
+            )
+            addView(
                 drawerToggleButton,
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     gravity = Gravity.BOTTOM or Gravity.END
@@ -112,6 +173,20 @@ class EngineFrameLayout(
     }
 
     /**
+     * 選択状態が変化するたびにEngineActivity側(engineHost.onTextSelectionChanged)から
+     * 呼んでもらう。ハイライトの再描画とコピーバーの表示/非表示をまとめて行う。
+     *
+     * @param state nullまたはmode==NONEなら非選択として扱い、ハイライト・コピーバーを消す。
+     * @param zoom / scrollY contentView(EngineView/GLEngineView)側のcanvas変換と揃えるための値。
+     *   呼び出し元はtabManager.foregroundSession()?.layoutEngineのzoomScale/scrollYをそのまま渡せばよい。
+     */
+    fun updateSelectionOverlay(state: TextSelectionState?, zoom: Float, scrollY: Float) {
+        val active = state != null && state.mode != com.B.b.Renderer.input.SelectionMode.NONE
+        selectionOverlayView.update(if (active) state else null, zoom, scrollY)
+        selectionActionBar.visibility = if (active) View.VISIBLE else View.GONE
+    }
+
+    /**
      * システムバー(ステータスバー/ナビゲーションバー)分のinsetsを、
      * 画面部品それぞれに適切に反映する。targetSdk 35のedge-to-edge対応。
      *
@@ -119,6 +194,9 @@ class EngineFrameLayout(
      *   これを入れないと、ページ内容がアドレスバーの真裏(同じy=0起点)に
      *   隠れて見えなくなる(2026-07、RENDER_DIAGログで描画自体は成功して
      *   いるのに画面が白く見えるという不具合の実際の原因だった)。
+     * - selectionOverlayViewはcontentViewと完全に同じ位置・サイズで重なる必要があるため
+     *   (SelectionOverlayView側のcanvas変換がcontentView側と一致している前提)、
+     *   同じinsets処理をそのまま適用する。
      * - loadingIndicatorも同様にアドレスバーの下に表示する。
      * - drawerToggleButtonはナビゲーションバーに埋もれないよう下マージンを足す。
      *
@@ -126,13 +204,17 @@ class EngineFrameLayout(
      * フォントサイズや余白を変更した場合はここも合わせて調整すること。
      */
     private fun applyChromeInsets() {
-        ViewCompat.setOnApplyWindowInsetsListener(contentView) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val params = view.layoutParams as FrameLayout.LayoutParams
-            params.topMargin = bars.top + dp(ADDRESS_BAR_HEIGHT_DP)
-            view.layoutParams = params
-            insets
+        val applyTopMarginBelowAddressBar = { view: View ->
+            ViewCompat.setOnApplyWindowInsetsListener(view) { v, insets ->
+                val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                val params = v.layoutParams as FrameLayout.LayoutParams
+                params.topMargin = bars.top + dp(ADDRESS_BAR_HEIGHT_DP)
+                v.layoutParams = params
+                insets
+            }
         }
+        applyTopMarginBelowAddressBar(contentView)
+        applyTopMarginBelowAddressBar(selectionOverlayView)
 
         ViewCompat.setOnApplyWindowInsetsListener(loadingIndicator) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -156,6 +238,16 @@ class EngineFrameLayout(
             val params = view.layoutParams as FrameLayout.LayoutParams
             params.bottomMargin = dp(12) + maxOf(bars.bottom, ime.bottom)
             params.rightMargin = dp(12) + bars.right
+            view.layoutParams = params
+            insets
+        }
+
+        // コピーバーもナビゲーションバー/IMEに埋もれないよう、drawerToggleButtonと同じ考え方で底上げする。
+        ViewCompat.setOnApplyWindowInsetsListener(selectionActionBar) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            val params = view.layoutParams as FrameLayout.LayoutParams
+            params.bottomMargin = dp(16) + maxOf(bars.bottom, ime.bottom)
             view.layoutParams = params
             insets
         }
