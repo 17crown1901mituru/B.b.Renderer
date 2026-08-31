@@ -83,12 +83,21 @@ class DeviceScriptEngine(
         onError: (Throwable) -> Unit,
     ) {
         executor.execute {
+            // 2026-08、デプロイ時の安全性チェックで指摘・却下された穴への対応。
+            // 下のコメントで「Packages/java等の汎用オブジェクトも一切スコープに置かない」
+            // と謳っていたが、initStandardObjects()はこれらを標準で追加してしまうため、
+            // 明示的に削除するまではコメント通りになっていなかった。
+            // ClassShutterのインストールはContext.enter()より前に済ませる必要があるため
+            // 必ずこの位置で行う(JsEngine側と同じRhinoSandbox、同じ理由)。
+            com.B.b.Renderer.js.RhinoSandbox.ensureClassShutterInstalled()
+
             val ctx = Context.enter()
             try {
                 ctx.optimizationLevel = -1 // Android(Dalvik/ART)ではJITコード生成非対応のため必須(JsEngineと同じ理由)
                 // 標準オブジェクトのみのまっさらなscope。JsEngine側のdocument/window等は
                 // 意図的に注入しない(device側はページDOMではなくShortcutApi経由でのみ操作する)。
                 val scope = ctx.initStandardObjects()
+                com.B.b.Renderer.js.RhinoSandbox.stripJavaGlobals(scope)
                 ScriptableObject.putProperty(scope, "shortcuts", Context.javaToJS(shortcutApi, scope))
                 installConvenienceGlobals(scope)
 

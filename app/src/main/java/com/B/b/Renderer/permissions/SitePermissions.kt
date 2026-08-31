@@ -22,7 +22,12 @@ class SitePermissions(context: Context) {
     // 同じ「既定不許可・ドメイン単位」のモデルに乗せる。ユーザー自身の長押し選択
     // →コピー操作(EngineActivity.onCopyTapped)はこの許可設定と無関係に常に使える
     // (あくまでページ側JSからの自動書き込みだけを許可制にしている)。
-    enum class Capability { VIBRATE, WAKE_LOCK, ORIENTATION_LOCK, THIRD_PARTY_COOKIES, GEOLOCATION, POPUPS, CLIPBOARD_WRITE }
+    // 2026-08、navigator.clipboard.readText()対応でCLIPBOARD_READを追加。読み取りは
+    // 書き込み(CLIPBOARD_WRITE)より機微度が高い(他アプリでコピーしたパスワードや
+    // ワンタイムコードがOSクリップボードに残っている可能性があり、ページが気付かれず
+    // それを読み取れてしまう)ため、あえて別のCapabilityとして分けている
+    // (WRITEだけ許可してREADは許可しない、という細かい制御を可能にするため)。
+    enum class Capability { VIBRATE, WAKE_LOCK, ORIENTATION_LOCK, THIRD_PARTY_COOKIES, GEOLOCATION, POPUPS, CLIPBOARD_WRITE, CLIPBOARD_READ }
 
     private val prefs = context.getSharedPreferences("site_permissions", Context.MODE_PRIVATE)
 

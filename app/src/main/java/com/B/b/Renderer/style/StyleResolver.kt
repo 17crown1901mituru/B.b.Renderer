@@ -2,6 +2,7 @@
 package com.B.b.Renderer.style
 
 import com.B.b.Renderer.core.Element
+import com.B.b.Renderer.core.ImageElement
 import com.B.b.Renderer.core.StackingContext
 
 /**
@@ -75,6 +76,28 @@ class StyleResolver(
         // インラインstyle属性は詳細度最強として最後に適用
         element.attributes["style"]?.let { inlineCss ->
             parseInlineDeclarations(inlineCss).forEach { decl -> style = applyDeclaration(style, decl, parentFontSize) }
+        }
+
+        // <img width="200" height="100">のHTML属性フォールバック(前回実装分の再対応)。
+        // HTML仕様上、この2属性は解決優先度が最も低いpresentational hintであり、
+        // ページ側CSSでwidth/heightが少しでも指定されていればそちらが常に勝つ。
+        // ここまでの処理(タグ既定スタイル→ページ側CSS→インラインstyle)を経ても
+        // style.widthがCssValue.Auto(=どこからもwidthが指定されなかった)の場合に限り、
+        // HTML属性値をCssValue.Pxとして注入する。他のpx系プロパティ(parseCssValue/
+        // parseLength)と揃え、CSS px基準の値としてdensityを掛けて物理px相当にする。
+        // 属性値が整数でない・存在しない場合は何もせず、resolveImageBoxSize()側の
+        // 自然サイズ(naturalWidth/naturalHeight)フォールバックに委ねる(安全側)。
+        if (element is ImageElement) {
+            if (style.width == CssValue.Auto) {
+                element.attributes["width"]?.trim()?.toFloatOrNull()?.let {
+                    style = style.copy(width = CssValue.Px(it * density))
+                }
+            }
+            if (style.height == CssValue.Auto) {
+                element.attributes["height"]?.trim()?.toFloatOrNull()?.let {
+                    style = style.copy(height = CssValue.Px(it * density))
+                }
+            }
         }
 
         return style

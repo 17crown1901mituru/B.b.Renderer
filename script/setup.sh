@@ -194,7 +194,7 @@ if [[ "$CURRENT_REMOTE" == https://github.com/* ]]; then
     git remote set-url origin "$SSH_REMOTE"
 fi
 
-COMMIT_SCRIPT="/storage/emulated/0/Download/B.b.Renderer/app/src/main/assets/commit.sh"
+COMMIT_SCRIPT="/storage/emulated/0/Download/B.b.Renderer/script/commit.sh"
 if [ -f "$COMMIT_SCRIPT" ]; then
     bash "$COMMIT_SCRIPT"
 else

@@ -212,6 +212,23 @@ class JsClipboard(
             JsThenable(succeeded = false, errorMessage = "clipboard permission denied (site setting)")
         }
     }
+
+    /**
+     * navigator.clipboard.readText()相当。実ページの`const text = await navigator.clipboard
+     * .readText()`や`.then(text => ...)`がそのまま動くよう、解決値(文字列)をJsThenableに
+     * 持たせて返す。許可されていない、またはOSクリップボードが空/テキスト以外の場合は
+     * reject相当(JsThenable.then()の第2引数、または.catch())に回る。
+     */
+    fun readText(): JsThenable {
+        val b = bridge ?: return JsThenable(succeeded = false, errorMessage = "clipboard unavailable")
+        val domain = currentUrl().toHttpDomainOrEmpty()
+        val text = b.readClipboardText(domain)
+        return if (text != null) {
+            JsThenable(succeeded = true, value = text)
+        } else {
+            JsThenable(succeeded = false, errorMessage = "clipboard permission denied (site setting) or empty")
+        }
+    }
 }
 
 /**
@@ -224,8 +241,12 @@ class JsClipboard(
  * だけ」という頻出パターンのためだけの最小限の実装であり、resolve/rejectは
  * コンストラクタ時点で既に確定している(then()を呼ぶまで実処理を遅延させたりはしない)。
  * 他のAPIへ流用する場合はこの前提(同期的に結果が決まっている)を満たすことを確認すること。
+ *
+ * @param value resolve時にonFulfilledへ渡す値(navigator.clipboard.readText()の
+ *   `.then(text => ...)`のように、解決値を使うAPI向け)。値を返さないAPI
+ *   (writeText()等)ではnullのままでよく、その場合onFulfilledは引数無しで呼ばれる。
  */
-class JsThenable(private val succeeded: Boolean, private val errorMessage: String = "") {
+class JsThenable(private val succeeded: Boolean, private val value: Any? = null, private val errorMessage: String = "") {
 
     /** Promise.then(onFulfilled, onRejected)相当。戻り値のthisをそのまま返すのでcatch()をさらに繋げられる。 */
     fun then(onFulfilled: Function?, onRejected: Function? = null): JsThenable {
@@ -235,7 +256,8 @@ class JsThenable(private val succeeded: Boolean, private val errorMessage: Strin
         try {
             val scope = ScriptableObject.getTopLevelScope(callback)
             if (succeeded) {
-                callback.call(ctx, scope, scope, emptyArray())
+                val args = value?.let { arrayOf(Context.javaToJS(it, scope)) } ?: emptyArray()
+                callback.call(ctx, scope, scope, args)
             } else {
                 val errorObject = ctx.newObject(scope)
                 ScriptableObject.putProperty(errorObject, "message", errorMessage)

@@ -48,10 +48,18 @@ class JsEngine(
     private val hxOnScanner = HxOnAttributeScanner(registry)
 
     init {
+        // 2026-08、デプロイ時の安全性チェックで指摘・却下された穴への対応。
+        // ページ由来の任意のJSが`Packages`/`java`経由で任意のJavaクラスへ到達できて
+        // しまっていた(DECISION_shortcut_api_boundary.mdの「限定APIのみ公開」という
+        // 原則に反する)。ClassShutterのインストールはContext.enter()より前に済ませる
+        // 必要があるため、必ずこの位置(initStandardObjects呼び出しより前)で行う。
+        RhinoSandbox.ensureClassShutterInstalled()
+
         val ctx = Context.enter()
         try {
             ctx.optimizationLevel = -1 // Android(Dalvik/ART)ではJITコード生成非対応のため必須
             val scope = ctx.initStandardObjects()
+            RhinoSandbox.stripJavaGlobals(scope)
 
             val jsDocument = JsDocument(root, domContext, registry)
             ScriptableObject.putProperty(scope, "document", Context.javaToJS(jsDocument, scope))

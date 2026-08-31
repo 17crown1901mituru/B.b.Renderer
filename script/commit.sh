@@ -134,7 +134,7 @@ else
 fi
 
 # --- watcher.py の二重起動防止 & 常駐化処理 ---
-WATCHER_SCRIPT="$REPO_DIR/app/src/main/assets/watcher.py"
+WATCHER_SCRIPT="$REPO_DIR/script/watcher.py"
 
 if [ -f "$WATCHER_SCRIPT" ]; then
     if ! pgrep -f "python3.*watcher.py" > /dev/null; then

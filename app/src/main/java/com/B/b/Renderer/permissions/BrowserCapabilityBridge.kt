@@ -132,6 +132,20 @@ class BrowserCapabilityBridge(
         return true
     }
 
+    var onClipboardReadRequested: (() -> String?)? = null
+
+    /**
+     * navigator.clipboard.readText()相当。SitePermissions.CLIPBOARD_READ(既定不許可、
+     * WRITEより機微度が高いため別権限)を許可しているドメインのページJSからのみ、
+     * 実際にOSクリップボードの内容を読む。
+     * @return 許可されておらず読み取れない場合、またはOSクリップボードが空/テキスト以外の
+     *   場合はnull。JsClipboard側はnullをreject相当として扱う。
+     */
+    fun readClipboardText(domain: String): String? {
+        if (!sitePermissions.isAllowed(domain, SitePermissions.Capability.CLIPBOARD_READ)) return null
+        return onClipboardReadRequested?.invoke()
+    }
+
     private fun getVibrator(): Vibrator? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val manager = activity.getSystemService(Activity.VIBRATOR_MANAGER_SERVICE) as? VibratorManager

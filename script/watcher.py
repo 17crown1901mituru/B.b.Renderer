@@ -18,7 +18,7 @@ except ImportError:
 
 # 監視対象（マスターソース）と実行スクリプトのパス
 WATCH_DIR = "/storage/emulated/0/Download/B.b.Renderer"
-SCRIPT_PATH = "/storage/emulated/0/Download/B.b.Renderer/app/src/main/assets/commit.sh"
+SCRIPT_PATH = "/storage/emulated/0/Download/B.b.Renderer/script/commit.sh"
 
 # 変更検知後、実行までの待機時間（秒）
 IDLE_SECONDS = 60

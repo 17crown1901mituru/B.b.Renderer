@@ -32,7 +32,7 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
         context = context,
         rootProvider = { layoutEngine?.root },
         layoutEngineProvider = { layoutEngine },
-        onSelectionChanged = { onTextSelectionChanged?.invoke(); requestRender() },
+        onSelectionChanged = { onTextSelectionChanged?.invoke(); safeRequestRender() },
     )
 
     override var onHtmxTrigger: ((Element) -> Unit)? = null
@@ -56,9 +56,6 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
             "GLEngineView.attach() called",
         )
 
-        // タブ切替時、古いroot/Elementを参照したままの選択状態を持ち越さない。
-        textSelectionGesture.clearSelection()
-
         layoutEngine = engine
         val existingRenderer = glRenderer
         if (existingRenderer == null) {
@@ -74,6 +71,14 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
             // attach→onSurfaceCreated間の遅延計測は初回起動時のみ意味を持つ)
             queueEvent { existingRenderer.updateLayoutEngine(engine) }
         }
+
+        // 2026-08訂正: 以前はここ(setRenderer()より前)でclearSelection()を呼んでいたため、
+        // 選択変更コールバック経由でrequestRender()が実行され、初回タブオープン時に
+        // 「setRenderer()未実行=GLThread未生成」の状態でGLSurfaceView.requestRender()を
+        // 呼んでNullPointerExceptionになっていた(実機クラッシュログで確認)。
+        // setRenderer()/queueEvent()より後、GLThreadが必ず存在する状態まで移動して解消する。
+        // タブ切替時、古いroot/Elementを参照したままの選択状態を持ち越さないための処理。
+        textSelectionGesture.clearSelection()
 
         val radioGroupController = RadioGroupController()
         touchController = TouchInputController(
@@ -145,13 +150,22 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
         post { requestRender() }
     }
 
+    /**
+     * 2026-08、GLThread未生成(setRenderer()未実行)の状態でrequestRender()を呼ぶと
+     * NullPointerExceptionになる(実機クラッシュで確認済み、attach()内の呼び出し順序を
+     * 直したのが本質的な修正だが、念のためこちら経由の呼び出し全てにもガードを掛けておく)。
+     */
+    private fun safeRequestRender() {
+        if (glRenderer != null) requestRender()
+    }
+
     override fun selectedText(): String = textSelectionGesture.selectedText()
 
     override fun clearTextSelection() = textSelectionGesture.clearSelection()
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (zoomGesture.onTouchEvent(event)) {
-            requestRender()
+            safeRequestRender()
             return true
         }
 
@@ -163,7 +177,7 @@ class GLEngineView(context: Context, attrs: AttributeSet? = null) :
             if (!wasSelectionActive && textSelectionGesture.isSelectionActive) {
                 touchController?.onTouchEvent(TouchPhase.CANCEL, event.x, event.y)
             }
-            requestRender()
+            safeRequestRender()
             return true
         }
 

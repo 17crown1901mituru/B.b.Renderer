@@ -15,13 +15,15 @@ import com.B.b.Renderer.core.HtmlFragmentParser
 import com.B.b.Renderer.core.ImageElement
 import com.B.b.Renderer.core.ImageLoadState
 import com.B.b.Renderer.data.BookmarkStore
-import com.B.b.Renderer.data.ClipboardHistoryStore
 import com.B.b.Renderer.data.HistoryStore
 import com.B.b.Renderer.debug.BehaviorAuditLog
 import com.B.b.Renderer.debug.DebugDrawerView
 import com.B.b.Renderer.device.DeviceScriptEngine
 import com.B.b.Renderer.device.RjsShortcutScanner
 import com.B.b.Renderer.device.ShortcutApi
+import com.B.b.Renderer.features.ClipboardFeature
+import com.B.b.Renderer.features.EngineFeature
+import com.B.b.Renderer.features.EngineFeatureContext
 import com.B.b.Renderer.htmx.HtmxRenderEngine
 import com.B.b.Renderer.js.JsDomContext
 import com.B.b.Renderer.js.JsEngine
@@ -87,8 +89,15 @@ class EngineActivity : AppCompatActivity() {
     private val thermalGuard by lazy { ThermalGuard(this) }
     private val historyStore by lazy { HistoryStore(this) }
     private val bookmarkStore by lazy { BookmarkStore(this) }
-    // 2026-08、画面長押しテキスト選択→コピーの履歴(最大100件)。
-    private val clipboardHistoryStore by lazy { ClipboardHistoryStore(this) }
+    // 2026-08、EngineFeature基盤(features/EngineFeature.kt参照)。機能ごとの配線を
+    // 各Featureの実装へ寄せ、EngineActivity側は生成したリストを3つのタイミング
+    // (onCreate/onSessionAttached/onDestroy)で呼ぶだけの薄い箱にする。
+    // 画面長押しテキスト選択→コピー・コピー履歴・navigator.clipboard.writeText()/
+    // readText()は最初の移植対象としてClipboardFeatureへまとめてある(元は本フィールド
+    // 周辺に直接書かれていた。docs/decisions/DECISION_engine_feature.md参照)。
+    private val clipboardFeature = ClipboardFeature()
+    private val features: List<EngineFeature> = listOf(clipboardFeature)
+    private lateinit var featureContext: EngineFeatureContext
     // registerForActivityResult()はSTARTEDになる前に呼ぶ必要があるため、他のフィールドと違い
     // by lazyにはしない(初回参照タイミングが遅れて登録できなくなる可能性があるため)。
     private val permissionManager = RuntimePermissionManager(this)
@@ -143,29 +152,20 @@ class EngineActivity : AppCompatActivity() {
         engineFrame = EngineFrameLayout(this, engineViewRoot)
         engineFrame.addressBarView.onSubmit = { url -> navigateForegroundTo(url) }
 
-        // 2026-08、画面長押しテキスト選択→コピー。「コピー」バーのタップで実際に
-        // Androidクリップボードへ書き込み(ClipboardHelper)、かつコピー履歴へも保存する
-        // (ドロワー「クリップボード」タブから後から見返せるようにするため)。
-        // クリップボード/コピー履歴どちらへの書き込みも、EngineView/GLEngineView自身は
-        // 一切行わない(役割分担はonHtmxTrigger等と同じ、選択状態の検知まではView側、
-        // 実際の永続化・OS連携はActivity側)。
-        engineFrame.onCopyTapped = {
-            val text = engineHost.selectedText()
-            if (text.isNotBlank()) {
-                ClipboardHelper.copyToClipboard(this, text)
-                clipboardHistoryStore.add(text)
-            }
-            engineHost.clearTextSelection()
-        }
-        engineFrame.onCancelSelectionTapped = { engineHost.clearTextSelection() }
-
-        // 2026-08、navigator.clipboard.writeText()対応。許可判定(SitePermissions.CLIPBOARD_WRITE)
-        // 自体はBrowserCapabilityBridge側で既に済んでいる状態でこのコールバックが呼ばれるため、
-        // ここでは長押し選択コピー(直上のengineFrame.onCopyTapped)と全く同じ2処理を行うだけでよい。
-        capabilityBridge.onClipboardWriteRequested = { text ->
-            ClipboardHelper.copyToClipboard(this, text)
-            clipboardHistoryStore.add(text)
-        }
+        // 2026-08、EngineFeature基盤の起動。engineFrame/engineHost/tabManagerの組み立てが
+        // ここまでで揃っているので、featureContextを1つ作って各Featureへ配布する。
+        // クリップボード/テキスト選択の配線(旧: engineFrame.onCopyTapped等をここに直接
+        // 書いていた)は、これによりClipboardFeature.onCreate()側で完結するようになった。
+        featureContext = EngineFeatureContext(
+            activity = this,
+            engineFrame = engineFrame,
+            engineHost = engineHost,
+            tabManager = tabManager,
+            sitePermissions = sitePermissions,
+            globalSettings = globalSettings,
+            capabilityBridge = capabilityBridge,
+        )
+        features.forEach { it.onCreate(featureContext) }
 
         tabBarView = TabBarView(this, tabManager, onTabChanged = {}).apply {
             onTabSelected = { id -> switchToTab(id) }
@@ -181,7 +181,7 @@ class EngineActivity : AppCompatActivity() {
             globalSettings = globalSettings,
             historyStore = historyStore,
             bookmarkStore = bookmarkStore,
-            clipboardHistoryStore = clipboardHistoryStore,
+            clipboardHistoryStore = clipboardFeature.clipboardHistoryStore,
             onCopyFromHistoryRequested = { text -> ClipboardHelper.copyToClipboard(this, text) },
             currentDomainProvider = { sitePermissions.domainOf(currentPageUrl) },
             onGlobalSettingsChanged = {
@@ -422,17 +422,12 @@ class EngineActivity : AppCompatActivity() {
         // (=このラムダごと新しいsession.urlの値で差し替えられるため)、常にそのタブの
         // 「今開いているページ」を基準にhrefが解決される。
         engineHost.onNavigate = { href -> navigateForegroundTo(resolveUrl(session.url, href)) }
-        // 2026-08、画面長押しテキスト選択。ハイライトの再描画・コピーバーの表示/非表示は
-        // EngineFrameLayout側に一任し、ここでは「今どのタブのzoom/scrollYを基準に
-        // 座標変換すればよいか」を都度渡すだけにする(タブ切替のたびにsession.layoutEngineの
-        // 参照先が変わるため、onHtmxTrigger/onNavigateと同様にここで毎回差し替える)。
-        engineHost.onTextSelectionChanged = {
-            engineFrame.updateSelectionOverlay(
-                engineHost.textSelectionState,
-                session.layoutEngine.zoomScale,
-                session.layoutEngine.scrollY,
-            )
-        }
+        // 2026-08、EngineFeature基盤経由の再配線。旧実装ではここで直接
+        // engineHost.onTextSelectionChanged = {...}を書いていたが、ClipboardFeatureへ
+        // 移植済み(タブ切替のたびonSessionAttached()が呼ばれ、そのタブのlayoutEngineを
+        // 基準にした選択ハイライト更新へ差し替わる。詳細はClipboardFeature.kt参照)。
+        // 他のFeatureが増えた場合もこの1行がそのまま面倒を見る。
+        features.forEach { it.onSessionAttached(session, featureContext) }
         currentPageUrl = session.url
         engineFrame.addressBarView.setUrl(session.url)
         recordHistoryVisit(session.url, session.title)
@@ -660,6 +655,7 @@ class EngineActivity : AppCompatActivity() {
         tabManager.allTabIds().filterNot { tabManager.isPinned(it) }.forEach { tabManager.closeTab(it) }
         if (::deviceEngine.isInitialized) deviceEngine.shutdown()
         thermalGuard.stopMonitoring()
+        features.forEach { it.onDestroy() }
         super.onDestroy()
     }
 
